@@ -12,18 +12,15 @@ st.set_page_config(
 )
 
 st.title("🤖 No-API AI Code Generator")
-st.write("This app uses a local Hugging Face code model. No OpenAI, Groq, Ollama, or API key required.")
+st.write("This app uses a local Hugging Face Qwen code model. No OpenAI, Groq, Ollama, or API key required.")
 
-# -----------------------------
-# Sidebar
-# -----------------------------
 st.sidebar.header("Settings")
 
 model_name = st.sidebar.selectbox(
     "Local AI Model",
     [
-        "Salesforce/codegen-350M-mono",
-        "distilgpt2"
+        "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+        "Qwen/Qwen2.5-Coder-1.5B-Instruct"
     ]
 )
 
@@ -44,9 +41,9 @@ language = st.sidebar.selectbox(
 max_new_tokens = st.sidebar.slider(
     "Maximum Output Length",
     min_value=100,
-    max_value=800,
-    value=350,
-    step=50
+    max_value=1200,
+    value=500,
+    step=100
 )
 
 temperature = st.sidebar.slider(
@@ -57,13 +54,11 @@ temperature = st.sidebar.slider(
     step=0.1
 )
 
-# -----------------------------
-# Load model
-# -----------------------------
+
 @st.cache_resource
 def load_model(selected_model):
-    tokenizer = AutoTokenizer.from_pretrained(selected_model)
-    model = AutoModelForCausalLM.from_pretrained(selected_model)
+    tokenizer = AutoTokenizer.from_pretrained(selected_model, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(selected_model, trust_remote_code=True)
 
     generator = pipeline(
         "text-generation",
@@ -74,9 +69,6 @@ def load_model(selected_model):
     return generator
 
 
-# -----------------------------
-# Inputs
-# -----------------------------
 instruction = st.text_area(
     "Enter your coding instruction",
     height=180,
@@ -88,39 +80,34 @@ existing_code = st.text_area(
     height=130
 )
 
-# -----------------------------
-# Prompt builder
-# -----------------------------
+
 def build_prompt(user_instruction, old_code):
     parts = []
 
-    parts.append("# Task")
+    parts.append("You are an expert coding assistant.")
     parts.append("Write complete runnable code.")
     parts.append("")
-    parts.append("# Programming language")
+    parts.append("Programming language:")
     parts.append(language)
     parts.append("")
-    parts.append("# User instruction")
+    parts.append("User instruction:")
     parts.append(user_instruction)
     parts.append("")
-    parts.append("# Existing code")
+    parts.append("Existing code:")
     parts.append(old_code)
     parts.append("")
-    parts.append("# Requirements")
+    parts.append("Requirements:")
     parts.append("- Include imports if needed")
     parts.append("- Include comments")
     parts.append("- Include error handling")
     parts.append("- Do not use API keys")
     parts.append("- Return code only")
     parts.append("")
-    parts.append("# Code")
+    parts.append("Code:")
 
     return "\n".join(parts)
 
 
-# -----------------------------
-# Clean generated code
-# -----------------------------
 def clean_output(text, prompt):
     text = text.replace(prompt, "")
 
@@ -136,9 +123,6 @@ def clean_output(text, prompt):
     return text.strip()
 
 
-# -----------------------------
-# Template fallback
-# -----------------------------
 def template_code(user_instruction):
     lower_text = user_instruction.lower()
 
@@ -180,9 +164,6 @@ else:
     return ""
 
 
-# -----------------------------
-# File extension
-# -----------------------------
 def get_extension(lang):
     mapping = {
         "Python": "py",
@@ -198,9 +179,6 @@ def get_extension(lang):
     return mapping.get(lang, "txt")
 
 
-# -----------------------------
-# Generate
-# -----------------------------
 if st.button("🚀 Generate Code", use_container_width=True):
 
     if not instruction.strip():
@@ -210,7 +188,7 @@ if st.button("🚀 Generate Code", use_container_width=True):
     fallback = template_code(instruction)
 
     try:
-        with st.spinner("Loading local model and generating code..."):
+        with st.spinner("Loading Qwen model and generating code..."):
             generator = load_model(model_name)
 
             prompt = build_prompt(instruction, existing_code)
@@ -220,8 +198,7 @@ if st.button("🚀 Generate Code", use_container_width=True):
                 max_new_tokens=max_new_tokens,
                 temperature=temperature,
                 do_sample=True,
-                num_return_sequences=1,
-                pad_token_id=50256
+                num_return_sequences=1
             )
 
             raw_text = result[0]["generated_text"]
@@ -266,16 +243,13 @@ if st.button("🚀 Generate Code", use_container_width=True):
             st.error("Error: " + str(e))
 
 
-# -----------------------------
-# Help
-# -----------------------------
 st.divider()
 st.subheader("requirements.txt")
 st.code(
-    "streamlit\ntransformers\ntorch\n",
+    "streamlit\ntransformers\ntorch\naccelerate\nsentencepiece\n",
     language="text"
 )
 
 st.subheader("Important")
 st.write("This app does not use any API key.")
-st.write("On Streamlit Cloud, the first model load may be slow.")
+st.write("On Streamlit Cloud, Qwen model loading may be slow and may fail if memory is limited.")
