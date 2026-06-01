@@ -1,123 +1,271 @@
-import os
-import requests
 import streamlit as st
-from dotenv import load_dotenv
-from openai import OpenAI
+import requests
+import re
+from datetime import datetime
 
-load_dotenv()
-
-st.set_page_config(page_title="AI Code Generator", layout="wide")
-
-st.title("🤖 AI Code Generator")
-st.write("Enter any coding instruction. The AI will create logic and ready-to-run code.")
-
-provider = st.selectbox(
-    "Choose AI Provider",
-    ["OpenAI", "Ollama Local"]
+st.set_page_config(
+    page_title="Academic AI Code Generator",
+    page_icon="🤖",
+    layout="wide"
 )
 
-language = st.selectbox(
+st.title("🤖 Academic AI Code Generator")
+st.write("Generate ready-to-run code from any instruction using an AI model.")
+
+# -----------------------------
+# API KEY from Streamlit Secrets
+# -----------------------------
+try:
+    GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+except Exception:
+    GROQ_API_KEY = ""
+
+# -----------------------------
+# Sidebar
+# -----------------------------
+st.sidebar.header("AI Settings")
+
+model = st.sidebar.selectbox(
+    "Choose Model",
+    [
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "qwen/qwen3-32b",
+        "deepseek-r1-distill-llama-70b"
+    ]
+)
+
+language = st.sidebar.selectbox(
     "Programming Language",
-    ["Python", "PHP", "HTML", "JavaScript", "SQL", "R", "Java", "C++", "Bash", "Other"]
+    [
+        "Python",
+        "Streamlit Python",
+        "Flask Python",
+        "R",
+        "SQL",
+        "PHP",
+        "HTML",
+        "JavaScript",
+        "Java",
+        "C++",
+        "Bash",
+        "Other"
+    ]
 )
 
-if provider == "OpenAI":
-    model = st.selectbox(
-        "OpenAI Model",
-        ["gpt-5.5", "gpt-5", "gpt-4.1"]
-    )
-else:
-    model = st.selectbox(
-        "Ollama Model",
-        ["qwen2.5-coder", "deepseek-coder", "codellama", "llama3"]
-    )
+code_type = st.sidebar.selectbox(
+    "Code Type",
+    [
+        "Complete application",
+        "Single script",
+        "Function only",
+        "Debug existing code",
+        "Modify existing code",
+        "Machine learning pipeline",
+        "Bioinformatics pipeline",
+        "Cheminformatics pipeline",
+        "SQL query",
+        "Web application"
+    ]
+)
 
+detail_level = st.sidebar.selectbox(
+    "Detail Level",
+    [
+        "Detailed",
+        "Very detailed",
+        "Production quality"
+    ]
+)
+
+temperature = st.sidebar.slider(
+    "Creativity",
+    0.0,
+    1.0,
+    0.2,
+    0.1
+)
+
+max_tokens = st.sidebar.slider(
+    "Maximum Output Tokens",
+    1000,
+    8000,
+    4000,
+    1000
+)
+
+# -----------------------------
+# Main input
+# -----------------------------
 instruction = st.text_area(
-    "Write your command / instruction",
+    "Enter your coding instruction",
     height=220,
     placeholder="""
 Example:
-Write Python code that takes a string input and searches for a name.
+Write Python code to input a string and search the name Tanmoy.
 
 Example:
-Create a Streamlit app for chemical similarity search using Tanimoto index.
+Create a Streamlit app to upload CSV and plot PCA.
 
 Example:
-Write SQL code to retrieve HLA typing from patient sample number.
+Write SQL query to retrieve HLA typing using sample number.
 """
 )
 
-def build_prompt(user_instruction, language):
+existing_code = st.text_area(
+    "Optional: Paste existing code for debugging or modification",
+    height=160
+)
+
+# -----------------------------
+# Helper functions
+# -----------------------------
+def build_prompt():
     return f"""
-You are an expert AI software engineer.
+You are an expert academic software engineer.
 
-User wants code in: {language}
+Programming language:
+{language}
 
-Instruction:
-{user_instruction}
+Code type:
+{code_type}
 
-Generate:
-1. Complete ready-to-run code
-2. Full logic
-3. Required imports
-4. Error handling
-5. Comments
-6. Example usage
-7. If web app is needed, create complete app.py
-8. If multiple files are needed, clearly separate each file
+Detail level:
+{detail_level}
 
-Return code only.
+User instruction:
+{instruction}
+
+Existing code:
+{existing_code}
+
+Requirements:
+1. Understand the request.
+2. Create the full logic.
+3. Generate complete ready-to-run code.
+4. Include imports.
+5. Include comments.
+6. Include error handling.
+7. Avoid placeholder code.
+8. If Streamlit app is requested, write complete app.py.
+9. If ML is requested, include preprocessing, training, evaluation, and saving.
+10. Return code only.
 """
 
-def generate_openai_code(prompt, model):
-    api_key = os.getenv("OPENAI_API_KEY")
+def extract_code(text):
+    blocks = re.findall(r"```(?:\w+)?\n(.*?)```", text, re.DOTALL)
+    if blocks:
+        return "\n\n".join(blocks).strip()
+    return text.strip()
 
-    if not api_key:
-        return "ERROR: OPENAI_API_KEY not found. Add it in .env file."
+def get_extension(lang):
+    mapping = {
+        "Python": "py",
+        "Streamlit Python": "py",
+        "Flask Python": "py",
+        "R": "R",
+        "SQL": "sql",
+        "PHP": "php",
+        "HTML": "html",
+        "JavaScript": "js",
+        "Java": "java",
+        "C++": "cpp",
+        "Bash": "sh",
+        "Other": "txt"
+    }
+    return mapping.get(lang, "txt")
 
-    client = OpenAI(api_key=api_key)
+def generate_code(prompt):
+    if not GROQ_API_KEY:
+        raise ValueError(
+            "GROQ_API_KEY is missing. Add it in Streamlit Cloud Secrets."
+        )
 
-    response = client.responses.create(
-        model=model,
-        input=prompt
-    )
+    url = "https://api.groq.com/openai/v1/chat/completions"
 
-    return response.output_text
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
 
-def generate_ollama_code(prompt, model):
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are an expert coding assistant. Return complete runnable code only."
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens
+    }
+
     response = requests.post(
-        "http://localhost:11434/api/generate",
-        json={
-            "model": model,
-            "prompt": prompt,
-            "stream": False
-        },
-        timeout=600
+        url,
+        headers=headers,
+        json=payload,
+        timeout=120
     )
 
-    if response.status_code != 200:
-        return f"Ollama Error: {response.text}"
+    response.raise_for_status()
+    data = response.json()
 
-    return response.json().get("response", "")
+    return data["choices"][0]["message"]["content"]
 
-if st.button("Generate Ready-to-Run Code"):
+# -----------------------------
+# Generate button
+# -----------------------------
+if st.button("🚀 Generate Code", use_container_width=True):
+
     if not instruction.strip():
         st.warning("Please enter a coding instruction.")
-    else:
-        prompt = build_prompt(instruction, language)
+        st.stop()
 
+    try:
         with st.spinner("Generating code..."):
-            if provider == "OpenAI":
-                output = generate_openai_code(prompt, model)
-            else:
-                output = generate_ollama_code(prompt, model)
+            prompt = build_prompt()
+            raw_output = generate_code(prompt)
+            clean_code = extract_code(raw_output)
+
+        st.success("Code generated successfully.")
 
         st.subheader("Generated Code")
-        st.code(output)
+        st.code(clean_code)
+
+        filename = f"generated_code_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{get_extension(language)}"
 
         st.download_button(
-            "Download Generated Code",
-            output,
-            file_name="generated_code.txt",
-            mime="text/plain"
+            "⬇️ Download Code",
+            clean_code,
+            file_name=filename,
+            mime="text/plain",
+            use_container_width=True
         )
+
+        with st.expander("View full AI response"):
+            st.write(raw_output)
+
+    except Exception as e:
+        st.error(str(e))
+
+# -----------------------------
+# Instructions
+# -----------------------------
+st.divider()
+
+st.subheader("Streamlit Cloud Setup")
+
+st.markdown(
+    """
+In your Streamlit Cloud app, go to:
+
+**Manage App → Settings → Secrets**
+
+Add:
+
+```toml
+GROQ_API_KEY = "your_groq_api_key_here"
