@@ -3,154 +3,182 @@ import requests
 import re
 from datetime import datetime
 
-# -----------------------------
-# Page Setup
-# -----------------------------
 st.set_page_config(
-    page_title="AI Code Generator",
+    page_title="Academic AI Code Generator",
     page_icon="🤖",
     layout="wide"
 )
 
 st.title("🤖 Academic AI Code Generator")
+st.write("Generate ready-to-run code from any instruction using Groq API.")
 
 # -----------------------------
-# Read API Key
+# Read Groq API key
 # -----------------------------
-GROQ_API_KEY = ""
-
 try:
     GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 except Exception:
-    pass
+    GROQ_API_KEY = ""
 
 # -----------------------------
 # Sidebar
 # -----------------------------
-with st.sidebar:
+st.sidebar.header("AI Settings")
 
-    st.header("Settings")
+model = st.sidebar.selectbox(
+    "Model",
+    [
+        "llama-3.1-8b-instant",
+        "llama-3.3-70b-versatile"
+    ]
+)
 
-    model = st.selectbox(
-        "Model",
-        [
-            "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant"
-        ]
-    )
+language = st.sidebar.selectbox(
+    "Programming Language",
+    [
+        "Python",
+        "Streamlit Python",
+        "Flask Python",
+        "SQL",
+        "R",
+        "PHP",
+        "HTML",
+        "JavaScript",
+        "Java",
+        "C++",
+        "Bash",
+        "Other"
+    ]
+)
 
-    language = st.selectbox(
-        "Language",
-        [
-            "Python",
-            "SQL",
-            "R",
-            "PHP",
-            "HTML",
-            "JavaScript",
-            "Java",
-            "C++"
-        ]
-    )
+detail_level = st.sidebar.selectbox(
+    "Detail Level",
+    [
+        "Detailed",
+        "Very detailed",
+        "Production quality"
+    ]
+)
 
-    detail = st.selectbox(
-        "Detail Level",
-        [
-            "Detailed",
-            "Very Detailed",
-            "Production Quality"
-        ]
-    )
+temperature = st.sidebar.slider(
+    "Creativity",
+    min_value=0.0,
+    max_value=1.0,
+    value=0.2,
+    step=0.1
+)
+
+max_tokens = st.sidebar.slider(
+    "Maximum Output Tokens",
+    min_value=1000,
+    max_value=8000,
+    value=4000,
+    step=1000
+)
 
 # -----------------------------
-# User Input
+# Main input
 # -----------------------------
 instruction = st.text_area(
-    "Enter Instruction",
+    "Enter your coding instruction",
     height=220,
-    placeholder="Write Python code to search a name in a string"
+    placeholder="Example: Write Python code to input a string and search the name Tanmoy."
 )
 
 existing_code = st.text_area(
-    "Optional Existing Code",
+    "Optional: Paste existing code for debugging or modification",
     height=150
 )
 
 # -----------------------------
-# Prompt Builder
+# Functions
 # -----------------------------
 def build_prompt():
+    parts = []
 
-    prompt = f"""
-You are an expert software engineer.
+    parts.append("You are an expert academic software engineer.")
+    parts.append("Generate complete, ready-to-run code.")
+    parts.append("")
+    parts.append("Programming language: " + language)
+    parts.append("Detail level: " + detail_level)
+    parts.append("")
+    parts.append("User instruction:")
+    parts.append(instruction)
+    parts.append("")
+    parts.append("Existing code if provided:")
+    parts.append(existing_code)
+    parts.append("")
+    parts.append("Requirements:")
+    parts.append("1. Understand the request.")
+    parts.append("2. Create the full logic.")
+    parts.append("3. Generate complete runnable code.")
+    parts.append("4. Include all imports.")
+    parts.append("5. Include comments.")
+    parts.append("6. Include error handling.")
+    parts.append("7. Avoid placeholder code.")
+    parts.append("8. If Streamlit app is requested, write complete app.py.")
+    parts.append("9. If machine learning is requested, include preprocessing, training, evaluation, and saving.")
+    parts.append("10. Return code only.")
 
-Programming Language:
-{language}
+    return "\n".join(parts)
 
-Detail Level:
-{detail}
 
-User Request:
-{instruction}
-
-Existing Code:
-{existing_code}
-
-Requirements:
-
-1. Generate complete runnable code.
-2. Include imports.
-3. Include comments.
-4. Include error handling.
-5. Include example usage.
-6. Do not omit important logic.
-7. Return code only.
-"""
-
-    return prompt
-
-# -----------------------------
-# Extract Code
-# -----------------------------
 def extract_code(text):
-
-    matches = re.findall(
-        r"```(?:\\w+)?\\n(.*?)```",
-        text,
-        re.DOTALL
-    )
+    pattern = r"```(?:\w+)?\n(.*?)```"
+    matches = re.findall(pattern, text, re.DOTALL)
 
     if matches:
-        return "\n\n".join(matches)
+        return "\n\n".join(matches).strip()
 
-    return text
+    return text.strip()
 
-# -----------------------------
-# Call Groq
-# -----------------------------
+
+def get_file_extension(lang):
+    mapping = {
+        "Python": "py",
+        "Streamlit Python": "py",
+        "Flask Python": "py",
+        "SQL": "sql",
+        "R": "R",
+        "PHP": "php",
+        "HTML": "html",
+        "JavaScript": "js",
+        "Java": "java",
+        "C++": "cpp",
+        "Bash": "sh",
+        "Other": "txt"
+    }
+
+    return mapping.get(lang, "txt")
+
+
 def generate_code(prompt):
+    if not GROQ_API_KEY:
+        raise ValueError("GROQ_API_KEY is missing. Add it in Streamlit Cloud Secrets.")
 
     url = "https://api.groq.com/openai/v1/chat/completions"
 
     headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Authorization": "Bearer " + GROQ_API_KEY,
         "Content-Type": "application/json"
     }
+
+    system_message = "You are an expert coding assistant. Return complete runnable code only."
 
     payload = {
         "model": model,
         "messages": [
             {
                 "role": "system",
-                "content": "Return complete runnable code."
+                "content": system_message
             },
             {
                 "role": "user",
                 "content": prompt
             }
         ],
-        "temperature": 0.2,
-        "max_tokens": 4000
+        "temperature": temperature,
+        "max_tokens": max_tokens
     }
 
     response = requests.post(
@@ -162,68 +190,60 @@ def generate_code(prompt):
 
     response.raise_for_status()
 
-    result = response.json()
+    data = response.json()
 
-    return result["choices"][0]["message"]["content"]
+    return data["choices"][0]["message"]["content"]
+
 
 # -----------------------------
 # Generate Button
 # -----------------------------
-if st.button("🚀 Generate Code"):
-
-    if not GROQ_API_KEY:
-        st.error(
-            "GROQ_API_KEY not found in Streamlit Secrets."
-        )
-        st.stop()
+if st.button("🚀 Generate Code", use_container_width=True):
 
     if not instruction.strip():
         st.warning("Please enter an instruction.")
         st.stop()
 
     try:
+        prompt = build_prompt()
 
         with st.spinner("Generating code..."):
-
-            prompt = build_prompt()
-
             raw_output = generate_code(prompt)
 
-            final_code = extract_code(raw_output)
+        clean_code = extract_code(raw_output)
 
-        st.success("Code Generated")
+        st.success("Code generated successfully.")
 
         st.subheader("Generated Code")
 
-        st.code(final_code)
+        st.code(clean_code)
 
-        filename = (
-            "generated_code_"
-            + datetime.now().strftime("%Y%m%d_%H%M%S")
-            + ".txt"
-        )
+        extension = get_file_extension(language)
+
+        file_name = "generated_code_" + datetime.now().strftime("%Y%m%d_%H%M%S") + "." + extension
 
         st.download_button(
-            label="Download Code",
-            data=final_code,
-            file_name=filename,
-            mime="text/plain"
+            label="⬇️ Download Code",
+            data=clean_code,
+            file_name=file_name,
+            mime="text/plain",
+            use_container_width=True
         )
 
-    except Exception as e:
+        with st.expander("View full AI response"):
+            st.write(raw_output)
 
+    except Exception as e:
         st.error(str(e))
 
 # -----------------------------
 # Footer
 # -----------------------------
 st.divider()
+st.subheader("Streamlit Cloud Setup")
 
-st.markdown(
-    """
-### Streamlit Cloud Setup
+st.write("Add this secret in Streamlit Cloud:")
+st.code('GROQ_API_KEY = "your_groq_api_key_here"', language="toml")
 
-Add this secret:
-
-```toml
-GROQ_API_KEY = "your_api_key"
+st.write("requirements.txt:")
+st.code("streamlit\nrequests", language="text")
