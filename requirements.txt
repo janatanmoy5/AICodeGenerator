@@ -3,4 +3,6 @@ requests
 pandas
 numpy
 pygments
+transformers
+torch
 
