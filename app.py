@@ -1,43 +1,28 @@
 import streamlit as st
-import requests
-import re
 from datetime import datetime
-
-# ==========================================================
-# AI Code Generator using Qwen/Ollama
-# No OpenAI API required
-# ==========================================================
-
-OLLAMA_URL = "http://localhost:11434/api/generate"
+import re
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 st.set_page_config(
-    page_title="Qwen AI Code Generator",
+    page_title="Qwen No-API Code Generator",
     page_icon="🤖",
     layout="wide"
 )
 
-st.title("🤖 Qwen AI Code Generator")
-st.write("Enter any command. Qwen will generate complete code in Python, R, SQL, HTML/CSS, JavaScript, Java, PHP, Bash, and more.")
+st.title("🤖 Qwen No-API Code Generator")
+st.write("Enter any coding command. Qwen will generate ready-to-use code.")
 
-# ==========================================================
-# Sidebar
-# ==========================================================
+MODEL_NAME = "Qwen/Qwen2.5-Coder-0.5B-Instruct"
 
-st.sidebar.header("AI Model Settings")
-
-model = st.sidebar.selectbox(
-    "Choose Qwen Model",
-    [
-        "qwen2.5-coder:7b",
-        "qwen2.5-coder:14b",
-        "qwen2.5-coder:32b",
-        "qwen2.5-coder:1.5b",
-        "qwen2.5-coder:0.5b"
-    ]
+command = st.text_area(
+    "Enter your command",
+    height=220,
+    placeholder="Example: Write Python code to add two numbers"
 )
 
-language = st.sidebar.selectbox(
-    "Programming Language",
+language = st.selectbox(
+    "Programming language",
     [
         "Auto Detect",
         "Python",
@@ -48,262 +33,169 @@ language = st.sidebar.selectbox(
         "Java",
         "PHP",
         "Bash",
-        "C++",
-        "Other"
+        "C++"
     ]
 )
 
-code_type = st.sidebar.selectbox(
-    "Code Type",
-    [
-        "Complete runnable code",
-        "Function only",
-        "Script",
-        "Web application",
-        "Streamlit app",
-        "Database query",
-        "Data analysis",
-        "Machine learning",
-        "Bioinformatics",
-        "Debug or modify code"
-    ]
+max_tokens = st.slider(
+    "Output length",
+    min_value=256,
+    max_value=2048,
+    value=1024,
+    step=256
 )
 
-detail_level = st.sidebar.selectbox(
-    "Detail Level",
-    [
-        "Detailed",
-        "Very detailed",
-        "Production quality"
-    ]
-)
 
-temperature = st.sidebar.slider(
-    "Creativity",
-    0.0,
-    1.0,
-    0.2,
-    0.1
-)
-
-max_tokens = st.sidebar.slider(
-    "Maximum output tokens",
-    1000,
-    16000,
-    6000,
-    1000
-)
-
-# ==========================================================
-# Input Area
-# ==========================================================
-
-command = st.text_area(
-    "Enter your command",
-    height=220,
-    placeholder="""
-Examples:
-
-Write Python code to add two numbers.
-
-Write R code for PCA analysis from CSV.
-
-Write SQL query to retrieve HLA typing by sample number.
-
-Create HTML/CSS landing page for a research lab.
-
-Write JavaScript code for a calculator.
-
-Write Java program for student grade calculation.
-
-Create Streamlit app for CSV upload and bar plot.
-
-Create Python machine learning pipeline for classification.
-"""
-)
-
-existing_code = st.text_area(
-    "Optional: Paste existing code for debugging or modification",
-    height=160
-)
-
-# ==========================================================
-# Helper Functions
-# ==========================================================
-
-def check_ollama_connection():
-    try:
-        response = requests.get(
-            "http://localhost:11434/api/tags",
-            timeout=5
-        )
-        return response.status_code == 200
-    except Exception:
-        return False
-
-
-def build_prompt(user_command, old_code):
-    parts = []
-
-    parts.append("You are Qwen Coder, an expert software engineer.")
-    parts.append("Your job is to generate complete, correct, ready-to-run code.")
-    parts.append("")
-    parts.append("User requested language:")
-    parts.append(language)
-    parts.append("")
-    parts.append("Code type:")
-    parts.append(code_type)
-    parts.append("")
-    parts.append("Detail level:")
-    parts.append(detail_level)
-    parts.append("")
-    parts.append("User command:")
-    parts.append(user_command)
-    parts.append("")
-    parts.append("Existing code if provided:")
-    parts.append(old_code)
-    parts.append("")
-    parts.append("Instructions:")
-    parts.append("1. Understand the user command.")
-    parts.append("2. Decide the correct logic.")
-    parts.append("3. Generate complete code.")
-    parts.append("4. Include all required imports.")
-    parts.append("5. Include comments inside the code.")
-    parts.append("6. Include error handling where appropriate.")
-    parts.append("7. Make the code immediately executable after copy-paste.")
-    parts.append("8. If the language is SQL, write clean SQL with comments.")
-    parts.append("9. If the language is HTML/CSS, include full HTML document with internal CSS unless user asks separate files.")
-    parts.append("10. If the request is JavaScript, include runnable HTML + JS if needed.")
-    parts.append("11. If the request is Java, include a complete public class with main method.")
-    parts.append("12. If the request is R, include complete R script.")
-    parts.append("13. If the request is Python, include complete Python script.")
-    parts.append("14. If the request is Streamlit, write complete app.py.")
-    parts.append("15. If multiple files are needed, separate them clearly with file names.")
-    parts.append("16. Do not use paid APIs.")
-    parts.append("17. Return code only. Do not explain outside the code.")
-
-    return "\n".join(parts)
-
-
-def generate_with_qwen(prompt):
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": temperature,
-            "num_predict": max_tokens
-        }
-    }
-
-    response = requests.post(
-        OLLAMA_URL,
-        json=payload,
-        timeout=600
+@st.cache_resource
+def load_qwen():
+    tokenizer = AutoTokenizer.from_pretrained(
+        MODEL_NAME,
+        trust_remote_code=True
     )
 
-    response.raise_for_status()
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_NAME,
+        trust_remote_code=True,
+        torch_dtype=torch.float32
+    )
 
-    data = response.json()
+    model.eval()
 
-    return data.get("response", "")
+    return tokenizer, model
 
 
-def extract_code(text):
-    blocks = re.findall(
-        r"```(?:\w+)?\n(.*?)```",
+def build_prompt(user_command, selected_language):
+    prompt = []
+
+    prompt.append("You are an expert software engineer and code generator.")
+    prompt.append("The user will give any coding command.")
+    prompt.append("You must generate complete, correct, copy-paste-ready code.")
+    prompt.append("")
+    prompt.append("Programming language:")
+    prompt.append(selected_language)
+    prompt.append("")
+    prompt.append("User command:")
+    prompt.append(user_command)
+    prompt.append("")
+    prompt.append("Rules:")
+    prompt.append("1. Understand the command.")
+    prompt.append("2. Create the correct programming logic.")
+    prompt.append("3. Generate full runnable code.")
+    prompt.append("4. Include imports when needed.")
+    prompt.append("5. Include helpful comments inside the code.")
+    prompt.append("6. Include input and output handling where useful.")
+    prompt.append("7. Do not use API keys.")
+    prompt.append("8. Do not write explanation outside the code.")
+    prompt.append("9. Return only the final code.")
+    prompt.append("10. If Streamlit is requested, generate a complete app.py.")
+    prompt.append("11. If HTML/CSS/JavaScript is requested, generate a full HTML file.")
+    prompt.append("12. If Java is requested, include a complete class with main method.")
+    prompt.append("13. If SQL is requested, generate clean SQL with comments.")
+    prompt.append("")
+    prompt.append("Final code:")
+
+    return "\n".join(prompt)
+
+
+def generate_code(user_command, selected_language, token_limit):
+    tokenizer, model = load_qwen()
+
+    prompt = build_prompt(user_command, selected_language)
+
+    messages = [
+        {
+            "role": "system",
+            "content": "You are Qwen Coder. Generate only complete runnable code."
+        },
+        {
+            "role": "user",
+            "content": prompt
+        }
+    ]
+
+    text = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+
+    inputs = tokenizer(
         text,
+        return_tensors="pt"
+    )
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=token_limit,
+            do_sample=True,
+            temperature=0.2,
+            top_p=0.9,
+            pad_token_id=tokenizer.eos_token_id
+        )
+
+    generated = tokenizer.decode(
+        outputs[0],
+        skip_special_tokens=True
+    )
+
+    if "Final code:" in generated:
+        generated = generated.split("Final code:")[-1].strip()
+
+    code_blocks = re.findall(
+        r"```(?:\w+)?\n(.*?)```",
+        generated,
         re.DOTALL
     )
 
-    if blocks:
-        return "\n\n".join(blocks).strip()
+    if code_blocks:
+        generated = "\n\n".join(code_blocks).strip()
 
-    return text.strip()
+    return generated.strip()
 
 
-def get_extension(selected_language, user_command):
-    lang = selected_language.lower()
-    cmd = user_command.lower()
+def get_file_extension(selected_language, user_command):
+    text = (selected_language + " " + user_command).lower()
 
-    if "python" in lang or "streamlit" in cmd:
+    if "python" in text or "streamlit" in text:
         return "py"
-    if lang == "r" or " r " in cmd:
-        return "R"
-    if "sql" in lang or "sql" in cmd:
+    if "sql" in text:
         return "sql"
-    if "html" in lang or "html" in cmd or "css" in cmd:
+    if "html" in text or "css" in text or "javascript" in text:
         return "html"
-    if "javascript" in lang or "javascript" in cmd or "js" in cmd:
-        return "html"
-    if "java" == lang or "java" in cmd:
+    if "java" in text:
         return "java"
-    if "php" in lang or "php" in cmd:
+    if " r " in text or selected_language == "R":
+        return "R"
+    if "php" in text:
         return "php"
-    if "bash" in lang or "bash" in cmd or "shell" in cmd:
+    if "bash" in text:
         return "sh"
-    if "c++" in lang or "cpp" in cmd:
+    if "c++" in text:
         return "cpp"
 
     return "txt"
 
 
-# ==========================================================
-# Buttons
-# ==========================================================
-
-col1, col2 = st.columns(2)
-
-with col1:
-    generate_button = st.button(
-        "🚀 Generate Code",
-        use_container_width=True
-    )
-
-with col2:
-    test_button = st.button(
-        "🔍 Test Qwen/Ollama Connection",
-        use_container_width=True
-    )
-
-# ==========================================================
-# Test Connection
-# ==========================================================
-
-if test_button:
-    if check_ollama_connection():
-        st.success("Ollama is running. Qwen model can be used.")
-    else:
-        st.error("Ollama is not running. Start it using: ollama serve")
-
-# ==========================================================
-# Generate Code
-# ==========================================================
-
-if generate_button:
-
+if st.button("🚀 Generate Code", use_container_width=True):
     if not command.strip():
         st.warning("Please enter a command.")
         st.stop()
 
-    if not check_ollama_connection():
-        st.error("Ollama is not running. Start Ollama first using: ollama serve")
-        st.stop()
-
-    prompt = build_prompt(command, existing_code)
-
     try:
-        with st.spinner("Qwen is generating code..."):
-            raw_output = generate_with_qwen(prompt)
-
-        final_code = extract_code(raw_output)
+        with st.spinner("Loading Qwen and generating code..."):
+            code = generate_code(
+                command,
+                language,
+                max_tokens
+            )
 
         st.success("Code generated successfully.")
 
         st.subheader("Generated Code")
-        st.code(final_code)
+        st.code(code)
 
-        extension = get_extension(language, command)
+        extension = get_file_extension(language, command)
 
         file_name = (
             "generated_code_"
@@ -314,27 +206,12 @@ if generate_button:
 
         st.download_button(
             label="⬇️ Download Code",
-            data=final_code,
+            data=code,
             file_name=file_name,
             mime="text/plain",
             use_container_width=True
         )
 
-        with st.expander("View raw Qwen response"):
-            st.write(raw_output)
-
-    except Exception as error:
-        st.error("Error generating code: " + str(error))
-
-# ==========================================================
-# Bottom information
-# ==========================================================
-
-st.divider()
-
-st.subheader("Local Setup")
-
-st.code(
-    "ollama serve\nollama pull qwen2.5-coder:7b\nstreamlit run app.py",
-    language="bash"
-)
+    except Exception as e:
+        st.error("Qwen model could not run on this Streamlit Cloud machine.")
+        st.error(str(e))
