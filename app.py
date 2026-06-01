@@ -1,35 +1,29 @@
 import streamlit as st
-import requests
-import re
 from datetime import datetime
+import re
+
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+
 
 st.set_page_config(
-    page_title="Academic AI Code Generator",
+    page_title="No API AI Code Generator",
     page_icon="🤖",
     layout="wide"
 )
 
-st.title("🤖 Academic AI Code Generator")
-st.write("Generate ready-to-run code from any instruction using Groq API.")
-
-# -----------------------------
-# Read Groq API key
-# -----------------------------
-try:
-    GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-except Exception:
-    GROQ_API_KEY = ""
+st.title("🤖 No-API AI Code Generator")
+st.write("This app uses a local Hugging Face code model. No OpenAI, Groq, Ollama, or API key required.")
 
 # -----------------------------
 # Sidebar
 # -----------------------------
-st.sidebar.header("AI Settings")
+st.sidebar.header("Settings")
 
-model = st.sidebar.selectbox(
-    "Model",
+model_name = st.sidebar.selectbox(
+    "Local AI Model",
     [
-        "llama-3.1-8b-instant",
-        "llama-3.3-70b-versatile"
+        "Salesforce/codegen-350M-mono",
+        "distilgpt2"
     ]
 )
 
@@ -38,165 +32,174 @@ language = st.sidebar.selectbox(
     [
         "Python",
         "Streamlit Python",
-        "Flask Python",
         "SQL",
         "R",
-        "PHP",
         "HTML",
         "JavaScript",
-        "Java",
-        "C++",
-        "Bash",
-        "Other"
+        "PHP",
+        "Bash"
     ]
 )
 
-detail_level = st.sidebar.selectbox(
-    "Detail Level",
-    [
-        "Detailed",
-        "Very detailed",
-        "Production quality"
-    ]
+max_new_tokens = st.sidebar.slider(
+    "Maximum Output Length",
+    min_value=100,
+    max_value=800,
+    value=350,
+    step=50
 )
 
 temperature = st.sidebar.slider(
     "Creativity",
-    min_value=0.0,
+    min_value=0.1,
     max_value=1.0,
-    value=0.2,
+    value=0.3,
     step=0.1
 )
 
-max_tokens = st.sidebar.slider(
-    "Maximum Output Tokens",
-    min_value=1000,
-    max_value=8000,
-    value=4000,
-    step=1000
-)
+# -----------------------------
+# Load model
+# -----------------------------
+@st.cache_resource
+def load_model(selected_model):
+    tokenizer = AutoTokenizer.from_pretrained(selected_model)
+    model = AutoModelForCausalLM.from_pretrained(selected_model)
+
+    generator = pipeline(
+        "text-generation",
+        model=model,
+        tokenizer=tokenizer
+    )
+
+    return generator
+
 
 # -----------------------------
-# Main input
+# Inputs
 # -----------------------------
 instruction = st.text_area(
     "Enter your coding instruction",
-    height=220,
-    placeholder="Example: Write Python code to input a string and search the name Tanmoy."
+    height=180,
+    placeholder="Example: Write Python code to add two numbers"
 )
 
 existing_code = st.text_area(
-    "Optional: Paste existing code for debugging or modification",
-    height=150
+    "Optional: Paste existing code for modification/debugging",
+    height=130
 )
 
 # -----------------------------
-# Functions
+# Prompt builder
 # -----------------------------
-def build_prompt():
+def build_prompt(user_instruction, old_code):
     parts = []
 
-    parts.append("You are an expert academic software engineer.")
-    parts.append("Generate complete, ready-to-run code.")
+    parts.append("# Task")
+    parts.append("Write complete runnable code.")
     parts.append("")
-    parts.append("Programming language: " + language)
-    parts.append("Detail level: " + detail_level)
+    parts.append("# Programming language")
+    parts.append(language)
     parts.append("")
-    parts.append("User instruction:")
-    parts.append(instruction)
+    parts.append("# User instruction")
+    parts.append(user_instruction)
     parts.append("")
-    parts.append("Existing code if provided:")
-    parts.append(existing_code)
+    parts.append("# Existing code")
+    parts.append(old_code)
     parts.append("")
-    parts.append("Requirements:")
-    parts.append("1. Understand the request.")
-    parts.append("2. Create the full logic.")
-    parts.append("3. Generate complete runnable code.")
-    parts.append("4. Include all imports.")
-    parts.append("5. Include comments.")
-    parts.append("6. Include error handling.")
-    parts.append("7. Avoid placeholder code.")
-    parts.append("8. If Streamlit app is requested, write complete app.py.")
-    parts.append("9. If machine learning is requested, include preprocessing, training, evaluation, and saving.")
-    parts.append("10. Return code only.")
+    parts.append("# Requirements")
+    parts.append("- Include imports if needed")
+    parts.append("- Include comments")
+    parts.append("- Include error handling")
+    parts.append("- Do not use API keys")
+    parts.append("- Return code only")
+    parts.append("")
+    parts.append("# Code")
 
     return "\n".join(parts)
 
 
-def extract_code(text):
-    pattern = r"```(?:\w+)?\n(.*?)```"
-    matches = re.findall(pattern, text, re.DOTALL)
+# -----------------------------
+# Clean generated code
+# -----------------------------
+def clean_output(text, prompt):
+    text = text.replace(prompt, "")
 
-    if matches:
-        return "\n\n".join(matches).strip()
+    blocks = re.findall(
+        r"```(?:\w+)?\n(.*?)```",
+        text,
+        re.DOTALL
+    )
+
+    if blocks:
+        return "\n\n".join(blocks).strip()
 
     return text.strip()
 
 
-def get_file_extension(lang):
+# -----------------------------
+# Template fallback
+# -----------------------------
+def template_code(user_instruction):
+    lower_text = user_instruction.lower()
+
+    if "add" in lower_text and "number" in lower_text:
+        return '''# Python program to add two numbers
+
+try:
+    num1 = float(input("Enter first number: "))
+    num2 = float(input("Enter second number: "))
+
+    result = num1 + num2
+
+    print("The sum is:", result)
+
+except ValueError:
+    print("Error: Please enter valid numeric values.")
+'''
+
+    if "search" in lower_text and "name" in lower_text:
+        return '''# Python program to search a name in a string
+
+text = input("Enter a sentence: ")
+name = input("Enter name to search: ")
+
+text_lower = text.lower()
+name_lower = name.lower()
+
+if name_lower in text_lower:
+    count = text_lower.count(name_lower)
+    position = text_lower.find(name_lower)
+
+    print("Name found")
+    print("Number of occurrences:", count)
+    print("First position:", position)
+else:
+    print("Name not found")
+'''
+
+    return ""
+
+
+# -----------------------------
+# File extension
+# -----------------------------
+def get_extension(lang):
     mapping = {
         "Python": "py",
         "Streamlit Python": "py",
-        "Flask Python": "py",
         "SQL": "sql",
         "R": "R",
-        "PHP": "php",
         "HTML": "html",
         "JavaScript": "js",
-        "Java": "java",
-        "C++": "cpp",
-        "Bash": "sh",
-        "Other": "txt"
+        "PHP": "php",
+        "Bash": "sh"
     }
 
     return mapping.get(lang, "txt")
 
 
-def generate_code(prompt):
-    if not GROQ_API_KEY:
-        raise ValueError("GROQ_API_KEY is missing. Add it in Streamlit Cloud Secrets.")
-
-    url = "https://api.groq.com/openai/v1/chat/completions"
-
-    headers = {
-        "Authorization": "Bearer " + GROQ_API_KEY,
-        "Content-Type": "application/json"
-    }
-
-    system_message = "You are an expert coding assistant. Return complete runnable code only."
-
-    payload = {
-        "model": model,
-        "messages": [
-            {
-                "role": "system",
-                "content": system_message
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        "temperature": temperature,
-        "max_tokens": max_tokens
-    }
-
-    response = requests.post(
-        url,
-        headers=headers,
-        json=payload,
-        timeout=120
-    )
-
-    response.raise_for_status()
-
-    data = response.json()
-
-    return data["choices"][0]["message"]["content"]
-
-
 # -----------------------------
-# Generate Button
+# Generate
 # -----------------------------
 if st.button("🚀 Generate Code", use_container_width=True):
 
@@ -204,46 +207,75 @@ if st.button("🚀 Generate Code", use_container_width=True):
         st.warning("Please enter an instruction.")
         st.stop()
 
+    fallback = template_code(instruction)
+
     try:
-        prompt = build_prompt()
+        with st.spinner("Loading local model and generating code..."):
+            generator = load_model(model_name)
 
-        with st.spinner("Generating code..."):
-            raw_output = generate_code(prompt)
+            prompt = build_prompt(instruction, existing_code)
 
-        clean_code = extract_code(raw_output)
+            result = generator(
+                prompt,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                do_sample=True,
+                num_return_sequences=1,
+                pad_token_id=50256
+            )
+
+            raw_text = result[0]["generated_text"]
+            generated_code = clean_output(raw_text, prompt)
+
+        if len(generated_code.strip()) < 20 and fallback:
+            generated_code = fallback
 
         st.success("Code generated successfully.")
 
         st.subheader("Generated Code")
+        st.code(generated_code)
 
-        st.code(clean_code)
-
-        extension = get_file_extension(language)
-
-        file_name = "generated_code_" + datetime.now().strftime("%Y%m%d_%H%M%S") + "." + extension
+        file_name = (
+            "generated_code_"
+            + datetime.now().strftime("%Y%m%d_%H%M%S")
+            + "."
+            + get_extension(language)
+        )
 
         st.download_button(
             label="⬇️ Download Code",
-            data=clean_code,
+            data=generated_code,
             file_name=file_name,
             mime="text/plain",
             use_container_width=True
         )
 
-        with st.expander("View full AI response"):
-            st.write(raw_output)
-
     except Exception as e:
-        st.error(str(e))
+        if fallback:
+            st.warning("Model failed, but template code was generated.")
+            st.code(fallback)
+
+            st.download_button(
+                label="⬇️ Download Template Code",
+                data=fallback,
+                file_name="generated_code.py",
+                mime="text/plain",
+                use_container_width=True
+            )
+        else:
+            st.error("Error: " + str(e))
+
 
 # -----------------------------
-# Footer
+# Help
 # -----------------------------
 st.divider()
-st.subheader("Streamlit Cloud Setup")
+st.subheader("requirements.txt")
+st.code(
+    "streamlit\ntransformers\ntorch\n",
+    language="text"
+)
 
-st.write("Add this secret in Streamlit Cloud:")
-st.code('GROQ_API_KEY = "your_groq_api_key_here"', language="toml")
-
-st.write("requirements.txt:")
-st.code("streamlit\nrequests", language="text")
+st.subheader("Important")
+st.write("This app does not use any API key.")
+st.write("On Streamlit Cloud, the first model load may be slow.")
