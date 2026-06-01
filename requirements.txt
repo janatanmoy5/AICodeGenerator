@@ -1,8 +1,6 @@
 streamlit
-requests
-pandas
-numpy
-pygments
 transformers
 torch
+accelerate
+sentencepiece
 
