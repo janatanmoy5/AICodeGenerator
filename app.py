@@ -1,79 +1,52 @@
 import os
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
+os.environ["HF_HOME"] = os.getenv("HF_HOME", "/tmp/huggingface")
+
 import re
 import gc
 from datetime import datetime
 
 import streamlit as st
 
-try:
-    import torch
-    from transformers import AutoTokenizer, AutoModelForCausalLM
-    QWEN_READY = True
-except Exception as import_error:
-    QWEN_READY = False
-    IMPORT_ERROR = import_error
-
 
 st.set_page_config(
-    page_title="Qwen AI Code Generator",
+    page_title="Qwen Code Generator",
     page_icon="🤖",
     layout="wide"
 )
 
-st.title("🤖 Qwen AI Code Generator")
-st.write("Write any coding command. Qwen will generate ready-to-copy code.")
+st.title("🤖 Qwen Code Generator")
+st.write("Enter any coding command. The app generates ready-to-copy code.")
 
-MODEL_NAME = os.getenv("QWEN_MODEL", "Qwen/Qwen2.5-Coder-0.5B-Instruct")
+MODEL_NAME = os.getenv(
+    "QWEN_MODEL",
+    "Qwen/Qwen2.5-Coder-0.5B-Instruct"
+)
 
-with st.sidebar:
-    st.header("Settings")
-
-    language = st.selectbox(
-        "Programming Language",
-        [
-            "Auto Detect",
-            "Python",
-            "R",
-            "Perl",
-            "C",
-            "C++",
-            "Java",
-            "JavaScript",
-            "TypeScript",
-            "HTML",
-            "CSS",
-            "HTML + CSS + JavaScript",
-            "SQL",
-            "PHP",
-            "Bash",
-            "Go",
-            "Rust"
-        ]
-    )
-
-    max_tokens = st.slider(
-        "Output Length",
-        min_value=128,
-        max_value=1536,
-        value=768,
-        step=128
-    )
-
-    temperature = st.slider(
-        "Creativity",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.2,
-        step=0.1
-    )
-
-    show_debug = st.checkbox("Show Debug Info", value=True)
-
-    if st.button("Clear Model Cache"):
-        st.cache_resource.clear()
-        gc.collect()
-        st.success("Cache cleared.")
-
+language = st.selectbox(
+    "Programming Language",
+    [
+        "Auto Detect",
+        "Python",
+        "R",
+        "Perl",
+        "C",
+        "C++",
+        "Java",
+        "JavaScript",
+        "TypeScript",
+        "HTML",
+        "CSS",
+        "HTML + CSS + JavaScript",
+        "SQL",
+        "PHP",
+        "Bash",
+        "Go",
+        "Rust"
+    ]
+)
 
 command = st.text_area(
     "Enter your coding command",
@@ -81,30 +54,21 @@ command = st.text_area(
     placeholder="Example: Write R code to add two numbers"
 )
 
+max_tokens = st.slider(
+    "Output Length",
+    min_value=128,
+    max_value=768,
+    value=384,
+    step=128
+)
 
-@st.cache_resource(show_spinner=False)
-def load_qwen_model():
-    tokenizer = AutoTokenizer.from_pretrained(
-        MODEL_NAME,
-        trust_remote_code=True
-    )
-
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_NAME,
-        trust_remote_code=True,
-        low_cpu_mem_usage=True,
-        torch_dtype=torch.float32
-    )
-
-    model.eval()
-
-    return tokenizer, model
+show_debug = st.checkbox("Show debug info", value=False)
 
 
 def build_prompt(user_command, selected_language):
     parts = []
 
-    parts.append("You are Qwen Coder, an expert programming assistant.")
+    parts.append("You are Qwen Coder.")
     parts.append("Generate complete, correct, copy-paste-ready code.")
     parts.append("")
     parts.append("Selected language:")
@@ -114,19 +78,14 @@ def build_prompt(user_command, selected_language):
     parts.append(user_command)
     parts.append("")
     parts.append("Rules:")
-    parts.append("1. Generate code in the requested language.")
-    parts.append("2. If Auto Detect is selected, infer language from the command.")
+    parts.append("1. Generate code in the requested language only.")
+    parts.append("2. If Auto Detect is selected, infer the language.")
     parts.append("3. Support Python, R, Perl, C, C++, Java, JavaScript, HTML, CSS, SQL, PHP, Bash, Go, Rust.")
     parts.append("4. Code must be runnable after copy-paste.")
-    parts.append("5. Include imports or package calls if required.")
+    parts.append("5. Include imports or packages if needed.")
     parts.append("6. Include comments inside code.")
-    parts.append("7. Do not explain outside code.")
-    parts.append("8. Do not use API keys.")
-    parts.append("9. For Java, use public class Main.")
-    parts.append("10. For R, use valid R syntax only.")
-    parts.append("11. For Perl, include use strict and use warnings.")
-    parts.append("12. For HTML/CSS/JavaScript, create a full HTML document if useful.")
-    parts.append("13. Return only final code.")
+    parts.append("7. Do not explain outside the code.")
+    parts.append("8. Return only final code.")
     parts.append("")
     parts.append("Final code:")
 
@@ -149,57 +108,12 @@ def clean_output(text):
     return text.strip()
 
 
-def generate_with_qwen(user_command, selected_language, token_limit, temp):
-    tokenizer, model = load_qwen_model()
-
-    prompt = build_prompt(user_command, selected_language)
-
-    messages = [
-        {
-            "role": "system",
-            "content": "You are Qwen Coder. Return only complete runnable code."
-        },
-        {
-            "role": "user",
-            "content": prompt
-        }
-    ]
-
-    input_text = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True
-    )
-
-    inputs = tokenizer(
-        input_text,
-        return_tensors="pt"
-    )
-
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=token_limit,
-            do_sample=True,
-            temperature=max(temp, 0.01),
-            top_p=0.9,
-            pad_token_id=tokenizer.eos_token_id
-        )
-
-    result = tokenizer.decode(
-        outputs[0],
-        skip_special_tokens=True
-    )
-
-    return clean_output(result)
-
-
 def fallback_code(user_command, selected_language):
     text = user_command.lower()
     lang = selected_language.lower()
 
     if selected_language == "Auto Detect":
-        if "r code" in text or text.startswith("r "):
+        if "r code" in text:
             lang = "r"
         elif "perl" in text:
             lang = "perl"
@@ -217,7 +131,7 @@ def fallback_code(user_command, selected_language):
             lang = "sql"
         elif "php" in text:
             lang = "php"
-        elif "bash" in text or "shell" in text:
+        elif "bash" in text:
             lang = "bash"
         else:
             lang = "python"
@@ -295,7 +209,7 @@ public class Main {
 }
 """
 
-        if lang == "html" or lang == "javascript":
+        if lang in ["html", "javascript"]:
             return """<!DOCTYPE html>
 <html>
 <head>
@@ -337,11 +251,85 @@ except ValueError:
     print("Error: Please enter valid numbers.")
 """
 
-    return """# Fallback starter code
+    return """# Starter code
 
-print("Qwen model could not generate code on this server.")
-print("Try a shorter prompt, reduce output length, or use a Render instance with more RAM.")
+print("Qwen could not complete this request on the current server.")
+print("Try a shorter prompt or reduce output length.")
 """
+
+
+def generate_with_qwen(user_command, selected_language, token_limit):
+    import torch
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+
+    tokenizer = None
+    model = None
+
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(
+            MODEL_NAME,
+            trust_remote_code=True
+        )
+
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_NAME,
+            trust_remote_code=True,
+            low_cpu_mem_usage=True,
+            torch_dtype="auto"
+        )
+
+        model.eval()
+
+        prompt = build_prompt(user_command, selected_language)
+
+        messages = [
+            {
+                "role": "system",
+                "content": "You are Qwen Coder. Return only complete runnable code."
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+
+        input_text = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True
+        )
+
+        inputs = tokenizer(
+            input_text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=1024
+        )
+
+        with torch.inference_mode():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=token_limit,
+                do_sample=False,
+                pad_token_id=tokenizer.eos_token_id
+            )
+
+        result = tokenizer.decode(
+            outputs[0],
+            skip_special_tokens=True
+        )
+
+        return clean_output(result)
+
+    finally:
+        del tokenizer
+        del model
+        gc.collect()
+
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
 
 
 def get_extension(selected_language, user_command):
@@ -382,47 +370,31 @@ if st.button("🚀 Generate Code", use_container_width=True):
         st.warning("Please enter a coding command.")
         st.stop()
 
-    progress = st.progress(0)
     status = st.empty()
-
-    code = ""
+    progress = st.progress(0)
 
     try:
-        if not QWEN_READY:
-            status.warning("Qwen dependencies are not available. Using fallback generator.")
-            code = fallback_code(command, language)
+        status.info("Preparing model...")
+        progress.progress(20)
 
-            if show_debug:
-                st.exception(IMPORT_ERROR)
+        status.info("Generating code...")
+        progress.progress(60)
 
-        else:
-            status.info("Step 1/3: Loading Qwen model...")
-            progress.progress(25)
+        code = generate_with_qwen(
+            user_command=command,
+            selected_language=language,
+            token_limit=max_tokens
+        )
 
-            tokenizer, model = load_qwen_model()
-
-            status.info("Step 2/3: Preparing prompt...")
-            progress.progress(50)
-
-            status.info("Step 3/3: Generating code...")
-            progress.progress(75)
-
-            code = generate_with_qwen(
-                user_command=command,
-                selected_language=language,
-                token_limit=max_tokens,
-                temp=temperature
-            )
-
-            progress.progress(100)
-            status.success("Code generated successfully.")
+        progress.progress(100)
+        status.success("Code generated successfully.")
 
     except Exception as error:
-        status.error("Qwen failed on this server. Showing fallback code.")
+        status.warning("Qwen could not run in this memory limit. Showing fallback output.")
         code = fallback_code(command, language)
 
         if show_debug:
-            with st.expander("Debug Error"):
+            with st.expander("Debug details"):
                 st.exception(error)
 
     st.subheader("Generated Code")
