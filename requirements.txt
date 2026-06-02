@@ -1,2 +1,7 @@
 streamlit
-requests
+torch
+torchvision
+transformers
+accelerate
+sentencepiece
+safetensors
