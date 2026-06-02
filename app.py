@@ -7,7 +7,6 @@ os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
 
 import streamlit as st
 
-
 st.set_page_config(
     page_title="Qwen AI Code Generator",
     page_icon="🤖",
@@ -15,18 +14,10 @@ st.set_page_config(
 )
 
 st.title("🤖 Qwen AI Code Generator")
-st.write(
-    "Enter any coding instruction. The app gives immediate code first, "
-    "then optionally tries Qwen code generation."
-)
+st.write("Enter any coding instruction. The app gives immediate code and can improve it using Qwen/Hugging Face.")
 
-MODEL_NAME = os.getenv(
-    "QWEN_MODEL",
-    "Qwen/Qwen2.5-Coder-32B-Instruct"
-)
-
+MODEL_NAME = os.getenv("QWEN_MODEL", "Qwen/Qwen2.5-Coder-32B-Instruct")
 API_URL = f"https://api-inference.huggingface.co/models/{MODEL_NAME}"
-
 
 with st.sidebar:
     st.header("Settings")
@@ -62,28 +53,20 @@ with st.sidebar:
         step=64
     )
 
-    use_qwen = st.checkbox(
-        "Use Qwen/Hugging Face generation",
-        value=True
-    )
+    use_qwen = st.checkbox("Use Qwen/Hugging Face generation", value=True)
 
     hf_token_input = st.text_input(
         "Hugging Face Token Optional",
         type="password"
     )
 
-    show_debug = st.checkbox(
-        "Show debug info",
-        value=True
-    )
-
+    show_debug = st.checkbox("Show debug info", value=True)
 
 command = st.text_area(
     "Enter your coding instruction",
     height=220,
     placeholder="Example: write R code to add two numbers"
 )
-
 
 def detect_language(user_command, selected_language):
     text = user_command.lower()
@@ -122,7 +105,6 @@ def detect_language(user_command, selected_language):
 
     return "Python"
 
-
 def get_extension(user_command, selected_language):
     lang = detect_language(user_command, selected_language)
 
@@ -146,7 +128,6 @@ def get_extension(user_command, selected_language):
     }
 
     return mapping.get(lang, "txt")
-
 
 def fallback_code(user_command, selected_language):
     text = user_command.lower()
@@ -330,6 +311,19 @@ int main() {
 }
 '''
 
+        if lang == "C":
+            return '''#include <stdio.h>
+
+int main() {
+    printf("My name is Tanmoy\\n");
+    return 0;
+}
+'''
+
+        if lang == "SQL":
+            return '''SELECT 'My name is Tanmoy' AS message;
+'''
+
         return '''print("My name is Tanmoy")
 '''
 
@@ -384,9 +378,8 @@ echo $message;
 # User request:
 # {user_command}
 
-print("Qwen is needed for this custom request.")
+print("Qwen can generate the full custom code for this request.")
 '''
-
 
 def build_prompt(user_command, selected_language):
     lang = detect_language(user_command, selected_language)
@@ -413,22 +406,20 @@ Rules:
 9. For HTML/CSS/JavaScript, return complete HTML if useful.
 '''
 
-
 def clean_output(text):
     blocks = re.findall(
-        r"```(?:\\w+)?\\n(.*?)```",
+        r"```(?:\w+)?\n(.*?)```",
         text,
         re.DOTALL
     )
 
     if blocks:
-        return "\\n\\n".join(blocks).strip()
+        return "\n\n".join(blocks).strip()
 
     if "Final code:" in text:
         text = text.split("Final code:")[-1].strip()
 
     return text.strip()
-
 
 def call_qwen_hf(user_command, selected_language, token_limit, token):
     headers = {
@@ -470,13 +461,10 @@ def call_qwen_hf(user_command, selected_language, token_limit, token):
 
     return clean_output(str(data))
 
-
 if st.button("🚀 Generate Code", use_container_width=True):
     if not command.strip():
         st.warning("Please enter your coding instruction.")
         st.stop()
-
-    detected_lang = detect_language(command, language)
 
     instant_code = fallback_code(command, language)
 
