@@ -21,47 +21,63 @@ except Exception:
 
 
 st.set_page_config(
-    page_title="Qwen Code Generator",
+    page_title="Lightweight AI Code Generator",
     page_icon="🤖",
     layout="wide"
 )
 
-st.title("🤖 Qwen Code Generator")
-st.write("User instruction → Qwen model → generated code.")
+st.title("🤖 Lightweight AI Code Generator")
+st.write("User instruction → lightweight pretrained code model → generated code.")
 
-MODEL_NAME = os.getenv("QWEN_MODEL", "Qwen/Qwen2.5-Coder-0.5B-Instruct")
+MODEL_NAME = os.getenv(
+    "MODEL_NAME",
+    "Salesforce/codegen-350M-mono"
+)
 
 with st.sidebar:
+    st.header("Model Settings")
+
     language = st.selectbox(
-        "Language",
+        "Programming Language",
         [
-            "Auto Detect", "Python", "R", "SQL", "Java", "C++",
-            "C", "Perl", "HTML", "CSS", "JavaScript", "PHP", "Bash"
+            "Auto Detect",
+            "Python",
+            "R",
+            "SQL",
+            "Java",
+            "C",
+            "C++",
+            "Perl",
+            "HTML",
+            "CSS",
+            "JavaScript",
+            "PHP",
+            "Bash"
         ]
     )
 
     max_tokens = st.slider(
-        "Output length",
-        32,
-        256,
-        128,
-        32
+        "Output Length",
+        min_value=32,
+        max_value=256,
+        value=128,
+        step=32
     )
 
     temperature = st.slider(
         "Creativity",
-        0.0,
-        1.0,
-        0.2,
-        0.1
+        min_value=0.0,
+        max_value=1.0,
+        value=0.2,
+        step=0.1
     )
 
-    show_debug = st.checkbox("Show debug", value=True)
+    show_debug = st.checkbox("Show Debug Error", value=True)
 
-    if st.button("Clear memory"):
+    if st.button("Clear Model Cache"):
         st.cache_resource.clear()
         gc.collect()
-        st.success("Memory cleared")
+        st.success("Model cache cleared.")
 
 
 command = st.text_area(
@@ -71,19 +87,16 @@ command = st.text_area(
 )
 
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner="Loading lightweight code model...")
 def load_model():
     tokenizer = AutoTokenizer.from_pretrained(
-        MODEL_NAME,
-        trust_remote_code=True
+        MODEL_NAME
     )
 
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
-        trust_remote_code=True,
         low_cpu_mem_usage=True,
-        torch_dtype=torch.float32,
-        device_map="cpu"
+        torch_dtype=torch.float32
     )
 
     model.eval()
@@ -92,7 +105,7 @@ def load_model():
 
 
 def detect_language(user_command, selected_language):
-    text = user_command.lower()
+    text = user_command.lower().strip()
 
     if selected_language != "Auto Detect":
         return selected_language
@@ -103,16 +116,18 @@ def detect_language(user_command, selected_language):
         return "SQL"
     if "java" in text and "javascript" not in text:
         return "Java"
-    if "c++" in text or "cpp" in text:
-        return "C++"
-    if "perl" in text:
-        return "Perl"
+    if "javascript" in text:
+        return "JavaScript"
     if "html" in text:
         return "HTML"
     if "css" in text:
         return "CSS"
-    if "javascript" in text or " js " in f" {text} ":
-        return "JavaScript"
+    if "c++" in text or "cpp" in text:
+        return "C++"
+    if " c " in f" {text} ":
+        return "C"
+    if "perl" in text:
+        return "Perl"
     if "php" in text:
         return "PHP"
     if "bash" in text or "shell" in text:
@@ -122,31 +137,50 @@ def detect_language(user_command, selected_language):
 
 
 def build_prompt(user_command, selected_language):
-    lang = detect_language(user_command, selected_language)
+    lang = detect_language(
+        user_command,
+        selected_language
+    )
 
-    return f"""
-You are Qwen Coder.
+    if lang == "R":
+        prefix = "# Write complete R code only\n"
+    elif lang == "SQL":
+        prefix = "-- Write complete SQL code only\n"
+    elif lang == "Java":
+        prefix = "// Write complete Java code only\n"
+    elif lang == "C++":
+        prefix = "// Write complete C++ code only\n"
+    elif lang == "C":
+        prefix = "// Write complete C code only\n"
+    elif lang == "Perl":
+        prefix = "# Write complete Perl code only\n"
+    elif lang == "HTML":
+        prefix = "<!-- Write complete HTML code only -->\n"
+    elif lang == "CSS":
+        prefix = "/* Write complete CSS code only */\n"
+    elif lang == "JavaScript":
+        prefix = "// Write complete JavaScript code only\n"
+    elif lang == "PHP":
+        prefix = "<?php\n// Write complete PHP code only\n"
+    elif lang == "Bash":
+        prefix = "#!/bin/bash\n# Write complete Bash code only\n"
+    else:
+        prefix = "# Write complete Python code only\n"
 
-Generate complete runnable code only.
+    prompt = (
+        prefix
+        + "# User instruction:\n"
+        + user_command
+        + "\n\n"
+        + "# Code:\n"
+    )
 
-Language:
-{lang}
-
-User instruction:
-{user_command}
-
-Rules:
-- Return only code.
-- No explanation.
-- Use only {lang}.
-- If R, write valid R syntax.
-- If Java, include public class Main.
-- If Perl, include use strict and use warnings.
-- If HTML/CSS/JavaScript, generate full HTML if useful.
-"""
+    return prompt
 
 
-def clean_output(text):
+def clean_output(text, prompt):
+    text = text.replace(prompt, "")
+
     blocks = re.findall(
         r"```(?:\w+)?\n(.*?)```",
         text,
@@ -156,37 +190,19 @@ def clean_output(text):
     if blocks:
         return "\n\n".join(blocks).strip()
 
-    if "assistant" in text:
-        parts = text.split("assistant")
-        text = parts[-1]
-
     return text.strip()
 
 
-def generate_with_qwen(user_command, selected_language, token_limit, temp):
+def generate_code(user_command, selected_language, token_limit, temp):
     tokenizer, model = load_model()
 
-    prompt = build_prompt(user_command, selected_language)
-
-    messages = [
-        {
-            "role": "system",
-            "content": "You are Qwen Coder. Return only final code."
-        },
-        {
-            "role": "user",
-            "content": prompt
-        }
-    ]
-
-    input_text = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True
+    prompt = build_prompt(
+        user_command,
+        selected_language
     )
 
     inputs = tokenizer(
-        input_text,
+        prompt,
         return_tensors="pt"
     )
 
@@ -205,53 +221,14 @@ def generate_with_qwen(user_command, selected_language, token_limit, temp):
         skip_special_tokens=True
     )
 
-    return clean_output(decoded)
+    return clean_output(
+        decoded,
+        prompt
+    )
 
 
 def fallback_code(user_command, selected_language):
     lang = detect_language(user_command, selected_language)
-    text = user_command.lower()
-
-    if "add" in text and "number" in text:
-        if lang == "R":
-            return '''# R program to add two numbers
-
-a <- as.numeric(readline("Enter first number: "))
-b <- as.numeric(readline("Enter second number: "))
-
-sum_result <- a + b
-
-cat("Sum:", sum_result, "\\n")
-'''
-
-        if lang == "Python":
-            return '''# Python program to add two numbers
-
-a = float(input("Enter first number: "))
-b = float(input("Enter second number: "))
-
-print("Sum:", a + b)
-'''
-
-        if lang == "Java":
-            return '''import java.util.Scanner;
-
-public class Main {
-    public static void main(String[] args) {
-        Scanner sc = new Scanner(System.in);
-
-        System.out.print("Enter first number: ");
-        double a = sc.nextDouble();
-
-        System.out.print("Enter second number: ");
-        double b = sc.nextDouble();
-
-        System.out.println("Sum: " + (a + b));
-
-        sc.close();
-    }
-}
-'''
 
     if lang == "R":
         return '''# Basic R code
@@ -267,42 +244,53 @@ print("Hello from Python")
 '''
 
     if lang == "SQL":
-        return '''-- Basic SQL query
+        return '''-- Basic SQL code
 
 SELECT *
 FROM table_name;
+'''
+
+    if lang == "Java":
+        return '''public class Main {
+    public static void main(String[] args) {
+        System.out.println("Hello from Java");
+    }
+}
 '''
 
     if lang == "HTML":
         return '''<!DOCTYPE html>
 <html>
 <head>
-    <title>Basic Page</title>
+    <title>Generated Page</title>
 </head>
 <body>
-    <h1>Hello World</h1>
+    <h1>Hello from HTML</h1>
 </body>
 </html>
 '''
 
     return f'''# Fallback code
 
-# Qwen did not complete on this server.
 # Detected language: {lang}
-# Request: {user_command}
+# User request:
+# {user_command}
 '''
 
 
 def get_extension(user_command, selected_language):
-    lang = detect_language(user_command, selected_language)
+    lang = detect_language(
+        user_command,
+        selected_language
+    )
 
     mapping = {
         "Python": "py",
         "R": "R",
         "SQL": "sql",
         "Java": "java",
-        "C++": "cpp",
         "C": "c",
+        "C++": "cpp",
         "Perl": "pl",
         "HTML": "html",
         "CSS": "css",
@@ -316,63 +304,83 @@ def get_extension(user_command, selected_language):
 
 if st.button("🚀 Generate Code", use_container_width=True):
     if not command.strip():
-        st.warning("Please enter instruction.")
+        st.warning("Please enter your coding instruction.")
         st.stop()
 
     status = st.empty()
     progress = st.progress(0)
 
-    code = ""
+    try:
+        if not MODEL_READY:
+            status.error("Model dependencies are missing.")
+            code = fallback_code(
+                command,
+                language
+            )
 
-    if not MODEL_READY:
-        status.error("Torch / Transformers not installed.")
-        code = fallback_code(command, language)
+            if show_debug:
+                st.subheader("Debug Traceback")
+                st.code(IMPORT_ERROR)
 
-        if show_debug:
-            st.code(IMPORT_ERROR)
-
-    else:
-        try:
-            status.info("Step 1: Loading Qwen model...")
-            progress.progress(25)
+        else:
+            status.info("Step 1: Loading lightweight pretrained model...")
+            progress.progress(30)
 
             load_model()
 
             status.info("Step 2: Generating code...")
-            progress.progress(60)
+            progress.progress(70)
 
-            code = generate_with_qwen(
-                command,
-                language,
-                max_tokens,
-                temperature
+            code = generate_code(
+                user_command=command,
+                selected_language=language,
+                token_limit=max_tokens,
+                temp=temperature
             )
 
+            if not code.strip():
+                code = fallback_code(
+                    command,
+                    language
+                )
+
             progress.progress(100)
-            status.success("Qwen generated code.")
+            status.success("Code generated successfully.")
 
-        except Exception:
-            status.error("Qwen failed. Showing fallback code.")
-            code = fallback_code(command, language)
+        st.subheader("Generated Code")
+        st.code(code)
 
-            if show_debug:
-                st.subheader("Debug")
-                st.code(traceback.format_exc())
+        extension = get_extension(
+            command,
+            language
+        )
 
-    st.subheader("Generated Code")
-    st.code(code)
+        file_name = (
+            "generated_code_"
+            + datetime.now().strftime("%Y%m%d_%H%M%S")
+            + "."
+            + extension
+        )
 
-    filename = (
-        "generated_code_"
-        + datetime.now().strftime("%Y%m%d_%H%M%S")
-        + "."
-        + get_extension(command, language)
-    )
+        st.download_button(
+            label="⬇️ Download Code",
+            data=code,
+            file_name=file_name,
+            mime="text/plain",
+            use_container_width=True
+        )
 
-    st.download_button(
-        "⬇️ Download Code",
-        data=code,
-        file_name=filename,
-        mime="text/plain",
-        use_container_width=True
-    )
+    except Exception:
+        status.error("Model failed. Showing fallback code.")
+
+        code = fallback_code(
+            command,
+            language
+        )
+
+        st.subheader("Generated Code")
+        st.code(code)
+
+        if show_debug:
+            st.subheader("Debug Traceback")
+            st.code(traceback.format_exc())
