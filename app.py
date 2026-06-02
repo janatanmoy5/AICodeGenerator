@@ -10,13 +10,13 @@ os.environ["HF_HOME"] = os.getenv("HF_HOME", "/tmp/huggingface")
 import streamlit as st
 
 st.set_page_config(
-    page_title="Qwen AI Code Generator",
+    page_title="Qwen Fast Code Generator",
     page_icon="🤖",
     layout="wide"
 )
 
-st.title("🤖 Qwen AI Code Generator")
-st.write("Enter any coding command. Qwen will generate copy-paste-ready code.")
+st.title("🤖 Qwen Fast Code Generator")
+st.write("Write any command. The app generates code. If Qwen is slow, fallback code appears immediately.")
 
 MODEL_NAME = os.getenv("QWEN_MODEL", "Qwen/Qwen2.5-Coder-0.5B-Instruct")
 
@@ -54,18 +54,17 @@ with st.sidebar:
         step=64
     )
 
-    use_qwen = st.checkbox(
-        "Use Qwen model",
-        value=True
-    )
+    use_qwen = st.checkbox("Use Qwen Model", value=True)
+    show_debug = st.checkbox("Show Debug Info", value=False)
 
-    show_debug = st.checkbox(
-        "Show debug info",
-        value=True
-    )
+    if st.button("Clear Memory"):
+        st.cache_resource.clear()
+        gc.collect()
+        st.success("Memory cleared.")
+
 
 command = st.text_area(
-    "Enter your coding command",
+    "Enter your coding instruction",
     height=220,
     placeholder="Example: Write R code to add two numbers"
 )
@@ -89,6 +88,8 @@ def detect_language(user_command, selected_language):
         return "Java"
     if "javascript" in text or " js " in f" {text} ":
         return "JavaScript"
+    if "typescript" in text:
+        return "TypeScript"
     if "html" in text:
         return "HTML"
     if "css" in text:
@@ -99,7 +100,7 @@ def detect_language(user_command, selected_language):
         return "PHP"
     if "bash" in text or "shell" in text:
         return "Bash"
-    if "go" in text:
+    if "go " in f" {text} ":
         return "Go"
     if "rust" in text:
         return "Rust"
@@ -107,11 +108,37 @@ def detect_language(user_command, selected_language):
     return "Python"
 
 
+def get_extension(user_command, selected_language):
+    lang = detect_language(user_command, selected_language)
+
+    mapping = {
+        "Python": "py",
+        "R": "R",
+        "Perl": "pl",
+        "C": "c",
+        "C++": "cpp",
+        "Java": "java",
+        "JavaScript": "html",
+        "TypeScript": "ts",
+        "HTML": "html",
+        "CSS": "css",
+        "HTML + CSS + JavaScript": "html",
+        "SQL": "sql",
+        "PHP": "php",
+        "Bash": "sh",
+        "Go": "go",
+        "Rust": "rs"
+    }
+
+    return mapping.get(lang, "txt")
+
+
 def fallback_code(user_command, selected_language):
     text = user_command.lower()
     lang = detect_language(user_command, selected_language)
 
     if "add" in text and "number" in text:
+
         if lang == "R":
             return """# R program to add two numbers
 
@@ -221,7 +248,9 @@ public class Main {
         function addNumbers() {
             const num1 = parseFloat(document.getElementById("num1").value);
             const num2 = parseFloat(document.getElementById("num2").value);
-            document.getElementById("result").innerText = "The sum is: " + (num1 + num2);
+            const sum = num1 + num2;
+
+            document.getElementById("result").innerText = "The sum is: " + sum;
         }
     </script>
 </body>
@@ -234,7 +263,9 @@ try:
     num1 = float(input("Enter first number: "))
     num2 = float(input("Enter second number: "))
 
-    print("The sum is:", num1 + num2)
+    result = num1 + num2
+
+    print("The sum is:", result)
 
 except ValueError:
     print("Error: Please enter valid numbers.")
@@ -243,34 +274,35 @@ except ValueError:
     return f"""# Starter code
 
 # Language: {lang}
-# Request: {user_command}
+# User request:
+# {user_command}
 
-print("Qwen generation could not complete on this server.")
-print("Try a shorter prompt or reduce output length.")
+print("Qwen is required for this custom request.")
+print("Try a shorter instruction or reduce output length if Qwen is slow.")
 """
 
 
 def build_prompt(user_command, selected_language):
     return f"""
-You are Qwen Coder.
+You are Qwen Coder, a fast expert programming assistant.
 
-Generate complete runnable code only.
-
-Language:
+Selected language:
 {selected_language}
 
-User command:
+User instruction:
 {user_command}
 
 Rules:
-- Return only code.
-- No explanation outside code.
-- Code must be copy-paste ready.
-- If Auto Detect, infer language.
-- Support Python, R, Perl, C, C++, Java, JavaScript, HTML, CSS, SQL, PHP, Bash, Go, Rust.
-- For Java use public class Main.
-- For Perl use strict and warnings.
-- For HTML/JavaScript create full HTML if useful.
+1. Generate only code.
+2. Do not explain outside the code.
+3. Code must be copy-paste ready.
+4. If Auto Detect is selected, infer language from instruction.
+5. Support Python, R, Perl, C, C++, Java, JavaScript, TypeScript, HTML, CSS, SQL, PHP, Bash, Go, and Rust.
+6. For Java, use public class Main.
+7. For Perl, include use strict and use warnings.
+8. For HTML/JavaScript/CSS, generate a full runnable HTML file when useful.
+9. For SQL, include clean SQL comments.
+10. Keep the code complete but concise.
 
 Final code:
 """
@@ -281,7 +313,7 @@ def clean_output(text):
         text = text.split("Final code:")[-1].strip()
 
     blocks = re.findall(
-        r"```(?:\w+)?\n(.*?)```",
+        r"```(?:\\w+)?\\n(.*?)```",
         text,
         re.DOTALL
     )
@@ -292,161 +324,135 @@ def clean_output(text):
     return text.strip()
 
 
-def generate_with_qwen(user_command, selected_language, token_limit):
+@st.cache_resource(show_spinner=False)
+def load_qwen_cached():
     import torch
     import transformers
 
-    if not hasattr(transformers, "AutoTokenizer"):
-        raise ImportError(
-            "AutoTokenizer not found in transformers. "
-            "Use transformers==4.52.4 in requirements.txt."
+    AutoTokenizer = getattr(transformers, "AutoTokenizer")
+    AutoModelForCausalLM = getattr(transformers, "AutoModelForCausalLM")
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        MODEL_NAME,
+        trust_remote_code=True
+    )
+
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_NAME,
+        trust_remote_code=True,
+        low_cpu_mem_usage=True,
+        torch_dtype="auto"
+    )
+
+    model.eval()
+
+    return tokenizer, model
+
+
+def generate_with_qwen(user_command, selected_language, token_limit):
+    import torch
+
+    tokenizer, model = load_qwen_cached()
+
+    prompt = build_prompt(user_command, selected_language)
+
+    messages = [
+        {
+            "role": "system",
+            "content": "You are Qwen Coder. Return only final runnable code."
+        },
+        {
+            "role": "user",
+            "content": prompt
+        }
+    ]
+
+    input_text = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+
+    inputs = tokenizer(
+        input_text,
+        return_tensors="pt",
+        truncation=True,
+        max_length=768
+    )
+
+    with torch.inference_mode():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=token_limit,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id
         )
 
-    if not hasattr(transformers, "AutoModelForCausalLM"):
-        raise ImportError(
-            "AutoModelForCausalLM not found in transformers. "
-            "Use transformers==4.52.4 in requirements.txt."
-        )
+    result = tokenizer.decode(
+        outputs[0],
+        skip_special_tokens=True
+    )
 
-    AutoTokenizer = transformers.AutoTokenizer
-    AutoModelForCausalLM = transformers.AutoModelForCausalLM
-
-    tokenizer = None
-    model = None
-
-    try:
-        tokenizer = AutoTokenizer.from_pretrained(
-            MODEL_NAME,
-            trust_remote_code=True
-        )
-
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_NAME,
-            trust_remote_code=True,
-            low_cpu_mem_usage=True,
-            torch_dtype="auto"
-        )
-
-        model.eval()
-
-        prompt = build_prompt(user_command, selected_language)
-
-        messages = [
-            {
-                "role": "system",
-                "content": "You are Qwen Coder. Return only code."
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
-
-        input_text = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True
-        )
-
-        inputs = tokenizer(
-            input_text,
-            return_tensors="pt",
-            truncation=True,
-            max_length=768
-        )
-
-        with torch.inference_mode():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=token_limit,
-                do_sample=False,
-                pad_token_id=tokenizer.eos_token_id
-            )
-
-        result = tokenizer.decode(
-            outputs[0],
-            skip_special_tokens=True
-        )
-
-        return clean_output(result)
-
-    finally:
-        del tokenizer
-        del model
-        gc.collect()
-
-        try:
-            torch.cuda.empty_cache()
-        except Exception:
-            pass
+    return clean_output(result)
 
 
-def get_extension(user_command, selected_language):
-    lang = detect_language(user_command, selected_language)
-
-    mapping = {
-        "Python": "py",
-        "R": "R",
-        "Perl": "pl",
-        "C": "c",
-        "C++": "cpp",
-        "Java": "java",
-        "JavaScript": "html",
-        "HTML": "html",
-        "HTML + CSS + JavaScript": "html",
-        "CSS": "css",
-        "SQL": "sql",
-        "PHP": "php",
-        "Bash": "sh",
-        "Go": "go",
-        "Rust": "rs"
-    }
-
-    return mapping.get(lang, "txt")
-
+if "final_code" not in st.session_state:
+    st.session_state.final_code = ""
 
 if st.button("🚀 Generate Code", use_container_width=True):
     if not command.strip():
-        st.warning("Please enter a command.")
+        st.warning("Please enter an instruction.")
         st.stop()
 
-    immediate_code = fallback_code(command, language)
+    fallback = fallback_code(command, language)
+    final_code = fallback
 
-    st.subheader("Immediate Output")
-    st.code(immediate_code)
+    with st.status("Generating code...", expanded=True) as status:
+        st.write("Step 1: Preparing immediate output...")
+        st.session_state.final_code = fallback
 
-    final_code = immediate_code
+        if use_qwen:
+            try:
+                st.write("Step 2: Loading Qwen model...")
+                st.write("Step 3: Generating code from your instruction...")
 
-    if use_qwen:
-        try:
-            with st.spinner("Trying Qwen generation..."):
                 qwen_code = generate_with_qwen(
                     user_command=command,
                     selected_language=language,
                     token_limit=max_tokens
                 )
 
-            if qwen_code and len(qwen_code.strip()) > 20:
-                final_code = qwen_code
+                if qwen_code and len(qwen_code.strip()) > 20:
+                    final_code = qwen_code
+                    st.session_state.final_code = final_code
+                    status.update(
+                        label="Qwen generated the code successfully.",
+                        state="complete"
+                    )
+                else:
+                    status.update(
+                        label="Qwen returned empty output. Immediate output is used.",
+                        state="complete"
+                    )
 
-                st.subheader("Qwen Generated Code")
-                st.code(final_code)
-            else:
-                st.warning("Qwen returned empty output. Immediate output is shown above.")
+            except Exception as error:
+                status.update(
+                    label="Qwen failed or server memory is low. Immediate output is used.",
+                    state="complete"
+                )
 
-        except Exception as error:
-            st.warning("Qwen failed on this server. Immediate output is shown above.")
+                if show_debug:
+                    with st.expander("Debug details"):
+                        st.exception(error)
+        else:
+            status.update(
+                label="Immediate output generated.",
+                state="complete"
+            )
 
-            if show_debug:
-                with st.expander("Debug details"):
-                    try:
-                        import transformers
-                        st.write("Transformers version:", getattr(transformers, "__version__", "unknown"))
-                        st.write("Transformers path:", getattr(transformers, "__file__", "unknown"))
-                    except Exception:
-                        st.write("Transformers could not be imported.")
-
-                    st.exception(error)
+if st.session_state.final_code:
+    st.subheader("Generated Code")
+    st.code(st.session_state.final_code)
 
     file_name = (
         "generated_code_"
@@ -456,8 +462,8 @@ if st.button("🚀 Generate Code", use_container_width=True):
     )
 
     st.download_button(
-        label="⬇️ Download Final Code",
-        data=final_code,
+        label="⬇️ Download Code",
+        data=st.session_state.final_code,
         file_name=file_name,
         mime="text/plain",
         use_container_width=True
