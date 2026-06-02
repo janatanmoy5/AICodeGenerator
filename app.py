@@ -1,6 +1,6 @@
 import os
 import re
-import multiprocessing as mp
+import gc
 from datetime import datetime
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -9,45 +9,100 @@ os.environ["HF_HOME"] = os.getenv("HF_HOME", "/tmp/huggingface")
 
 import streamlit as st
 
-st.set_page_config(page_title="Qwen Code Generator", page_icon="🤖", layout="wide")
+
+# ==========================================================
+# PAGE CONFIG
+# ==========================================================
+
+st.set_page_config(
+    page_title="Qwen AI Code Generator",
+    page_icon="🤖",
+    layout="wide"
+)
+
+st.title("🤖 Qwen AI Code Generator")
+st.write(
+    "Write any command. The app loads Qwen, prepares the logic, "
+    "generates code, shows it clearly, and provides a download button."
+)
 
 MODEL_NAME = os.getenv("QWEN_MODEL", "Qwen/Qwen2.5-Coder-0.5B-Instruct")
 
-st.title("🤖 Qwen Code Generator")
-st.write("Write any command. Fallback appears immediately. Qwen output appears only if it finishes fast.")
 
-language = st.selectbox(
-    "Programming Language",
-    [
-        "Auto Detect", "Python", "R", "Perl", "C", "C++", "Java",
-        "JavaScript", "HTML", "CSS", "SQL", "PHP", "Bash"
-    ]
-)
+# ==========================================================
+# SIDEBAR
+# ==========================================================
+
+with st.sidebar:
+    st.header("Settings")
+
+    language = st.selectbox(
+        "Programming Language",
+        [
+            "Auto Detect",
+            "Python",
+            "R",
+            "Perl",
+            "C",
+            "C++",
+            "Java",
+            "JavaScript",
+            "TypeScript",
+            "HTML",
+            "CSS",
+            "HTML + CSS + JavaScript",
+            "SQL",
+            "PHP",
+            "Bash",
+            "Go",
+            "Rust"
+        ]
+    )
+
+    max_tokens = st.slider(
+        "Output Length",
+        min_value=64,
+        max_value=512,
+        value=256,
+        step=64
+    )
+
+    use_qwen = st.checkbox(
+        "Use Qwen Model",
+        value=True
+    )
+
+    show_debug = st.checkbox(
+        "Show Debug Info",
+        value=False
+    )
+
+    if st.button("Clear Memory"):
+        st.cache_resource.clear()
+        gc.collect()
+        st.success("Memory cleared.")
+
+
+# ==========================================================
+# USER INPUT
+# ==========================================================
 
 command = st.text_area(
     "Enter your coding instruction",
     height=220,
-    placeholder="Example: Write Python code to add two numbers"
+    placeholder="Example: Write HTML code to print my name is Tanmoy"
 )
 
-max_tokens = st.slider("Output Length", 64, 384, 192, 64)
 
-qwen_timeout = st.slider(
-    "Qwen Timeout Seconds",
-    min_value=10,
-    max_value=90,
-    value=30,
-    step=10
-)
+# ==========================================================
+# LANGUAGE DETECTION
+# ==========================================================
 
-use_qwen = st.checkbox("Try Qwen model", value=True)
+def detect_language(user_command, selected_language):
+    text = user_command.lower()
 
-
-def detect_language(cmd, selected):
-    text = cmd.lower()
-
-    if selected != "Auto Detect":
-        return selected
+    if selected_language != "Auto Detect":
+        return selected_language
 
     if "r code" in text or text.startswith("r "):
         return "R"
@@ -61,6 +116,8 @@ def detect_language(cmd, selected):
         return "Java"
     if "javascript" in text or " js " in f" {text} ":
         return "JavaScript"
+    if "typescript" in text:
+        return "TypeScript"
     if "html" in text:
         return "HTML"
     if "css" in text:
@@ -71,17 +128,156 @@ def detect_language(cmd, selected):
         return "PHP"
     if "bash" in text or "shell" in text:
         return "Bash"
+    if "go " in f" {text} ":
+        return "Go"
+    if "rust" in text:
+        return "Rust"
 
     return "Python"
 
 
-def fallback_code(cmd, selected):
-    text = cmd.lower()
-    lang = detect_language(cmd, selected)
+# ==========================================================
+# FILE EXTENSION
+# ==========================================================
 
+def get_extension(user_command, selected_language):
+    lang = detect_language(user_command, selected_language)
+
+    mapping = {
+        "Python": "py",
+        "R": "R",
+        "Perl": "pl",
+        "C": "c",
+        "C++": "cpp",
+        "Java": "java",
+        "JavaScript": "html",
+        "TypeScript": "ts",
+        "HTML": "html",
+        "CSS": "css",
+        "HTML + CSS + JavaScript": "html",
+        "SQL": "sql",
+        "PHP": "php",
+        "Bash": "sh",
+        "Go": "go",
+        "Rust": "rs"
+    }
+
+    return mapping.get(lang, "txt")
+
+
+# ==========================================================
+# FALLBACK GENERATOR
+# Shows immediate useful output if Qwen is slow/fails
+# ==========================================================
+
+def fallback_code(user_command, selected_language):
+    text = user_command.lower()
+    lang = detect_language(user_command, selected_language)
+
+    # --------------------------
+    # NAME PRINTING EXAMPLES
+    # --------------------------
+    if "name" in text and "tanmoy" in text:
+        if lang == "HTML":
+            return """<!DOCTYPE html>
+<html>
+<head>
+    <title>Print Name</title>
+</head>
+<body>
+    <h1>My name is Tanmoy</h1>
+</body>
+</html>
+"""
+
+        if lang == "CSS":
+            return """body {
+    font-family: Arial, sans-serif;
+    background-color: #f5f7fa;
+    color: #222;
+}
+
+h1 {
+    color: #0057b8;
+    text-align: center;
+}
+"""
+
+        if lang == "JavaScript":
+            return """<!DOCTYPE html>
+<html>
+<head>
+    <title>Print Name</title>
+</head>
+<body>
+    <h1 id="output"></h1>
+
+    <script>
+        document.getElementById("output").innerText = "My name is Tanmoy";
+    </script>
+</body>
+</html>
+"""
+
+        if lang == "PHP":
+            return """<?php
+$name = "Tanmoy";
+echo "My name is " . $name;
+?>
+"""
+
+        if lang == "R":
+            return """cat("My name is Tanmoy\\n")
+"""
+
+        if lang == "Perl":
+            return """#!/usr/bin/perl
+use strict;
+use warnings;
+
+print "My name is Tanmoy\\n";
+"""
+
+        if lang == "C":
+            return """#include <stdio.h>
+
+int main() {
+    printf("My name is Tanmoy\\n");
+    return 0;
+}
+"""
+
+        if lang == "C++":
+            return """#include <iostream>
+using namespace std;
+
+int main() {
+    cout << "My name is Tanmoy" << endl;
+    return 0;
+}
+"""
+
+        if lang == "Java":
+            return """public class Main {
+    public static void main(String[] args) {
+        System.out.println("My name is Tanmoy");
+    }
+}
+"""
+
+        if lang == "SQL":
+            return """SELECT 'My name is Tanmoy' AS message;
+"""
+
+        return """print("My name is Tanmoy")
+"""
+
+    # --------------------------
+    # ADD TWO NUMBERS
+    # --------------------------
     if "add" in text and "number" in text:
         if lang == "R":
-            return '''# R program to add two numbers
+            return """# R program to add two numbers
 
 add_two_numbers <- function(a, b) {
   return(a + b)
@@ -93,10 +289,65 @@ num2 <- as.numeric(readline(prompt = "Enter second number: "))
 result <- add_two_numbers(num1, num2)
 
 cat("The sum is:", result, "\\n")
-'''
+"""
+
+        if lang == "Perl":
+            return """#!/usr/bin/perl
+use strict;
+use warnings;
+
+print "Enter first number: ";
+my $num1 = <STDIN>;
+chomp($num1);
+
+print "Enter second number: ";
+my $num2 = <STDIN>;
+chomp($num2);
+
+my $sum = $num1 + $num2;
+
+print "The sum is: $sum\\n";
+"""
+
+        if lang == "C":
+            return """#include <stdio.h>
+
+int main() {
+    double num1, num2;
+
+    printf("Enter first number: ");
+    scanf("%lf", &num1);
+
+    printf("Enter second number: ");
+    scanf("%lf", &num2);
+
+    printf("The sum is: %.2f\\n", num1 + num2);
+
+    return 0;
+}
+"""
+
+        if lang == "C++":
+            return """#include <iostream>
+using namespace std;
+
+int main() {
+    double num1, num2;
+
+    cout << "Enter first number: ";
+    cin >> num1;
+
+    cout << "Enter second number: ";
+    cin >> num2;
+
+    cout << "The sum is: " << num1 + num2 << endl;
+
+    return 0;
+}
+"""
 
         if lang == "Java":
-            return '''import java.util.Scanner;
+            return """import java.util.Scanner;
 
 public class Main {
     public static void main(String[] args) {
@@ -113,29 +364,10 @@ public class Main {
         scanner.close();
     }
 }
-'''
+"""
 
-        if lang == "C++":
-            return '''#include <iostream>
-using namespace std;
-
-int main() {
-    double a, b;
-
-    cout << "Enter first number: ";
-    cin >> a;
-
-    cout << "Enter second number: ";
-    cin >> b;
-
-    cout << "Sum: " << a + b << endl;
-
-    return 0;
-}
-'''
-
-        if lang == "JavaScript" or lang == "HTML":
-            return '''<!DOCTYPE html>
+        if lang in ["JavaScript", "HTML", "HTML + CSS + JavaScript"]:
+            return """<!DOCTYPE html>
 <html>
 <head>
     <title>Add Two Numbers</title>
@@ -143,228 +375,314 @@ int main() {
 <body>
     <h2>Add Two Numbers</h2>
 
-    <input id="a" type="number" placeholder="First number">
-    <input id="b" type="number" placeholder="Second number">
+    <input id="num1" type="number" placeholder="First number">
+    <input id="num2" type="number" placeholder="Second number">
     <button onclick="addNumbers()">Add</button>
 
     <p id="result"></p>
 
     <script>
         function addNumbers() {
-            const a = parseFloat(document.getElementById("a").value);
-            const b = parseFloat(document.getElementById("b").value);
+            const num1 = parseFloat(document.getElementById("num1").value);
+            const num2 = parseFloat(document.getElementById("num2").value);
+            const sum = num1 + num2;
 
-            document.getElementById("result").innerText = "Sum: " + (a + b);
+            document.getElementById("result").innerText = "The sum is: " + sum;
         }
     </script>
 </body>
 </html>
-'''
+"""
 
-        return '''# Python program to add two numbers
+        return """# Python program to add two numbers
 
 try:
-    a = float(input("Enter first number: "))
-    b = float(input("Enter second number: "))
+    num1 = float(input("Enter first number: "))
+    num2 = float(input("Enter second number: "))
 
-    print("Sum:", a + b)
+    result = num1 + num2
+
+    print("The sum is:", result)
 
 except ValueError:
     print("Error: Please enter valid numbers.")
-'''
+"""
 
-    return f'''# Starter code generated immediately
+    # --------------------------
+    # BASIC HTML
+    # --------------------------
+    if lang == "HTML":
+        return """<!DOCTYPE html>
+<html>
+<head>
+    <title>Generated HTML Page</title>
+</head>
+<body>
+    <h1>Hello World</h1>
+    <p>This page was generated from your instruction.</p>
+</body>
+</html>
+"""
+
+    # --------------------------
+    # BASIC PHP
+    # --------------------------
+    if lang == "PHP":
+        return """<?php
+// Simple PHP starter code
+
+$message = "Hello from PHP";
+echo $message;
+?>
+"""
+
+    # --------------------------
+    # BASIC SQL
+    # --------------------------
+    if lang == "SQL":
+        return """-- SQL query template
+
+SELECT
+    *
+FROM
+    table_name
+WHERE
+    condition_column = 'value';
+"""
+
+    # --------------------------
+    # DEFAULT
+    # --------------------------
+    return f"""# Starter code
 
 # Language: {lang}
 # User request:
-# {cmd}
+# {user_command}
 
-print("This request needs Qwen AI generation.")
-print("Qwen did not finish quickly, so this fallback output is shown.")
-'''
+print("Qwen is required for this custom request.")
+print("If Qwen is slow, reduce output length or use a stronger Render instance.")
+"""
 
+
+# ==========================================================
+# PROMPT FOR QWEN
+# ==========================================================
+
+def build_prompt(user_command, selected_language):
+    return f"""
+You are Qwen Coder, a fast expert programming assistant.
+
+Selected language:
+{selected_language}
+
+User instruction:
+{user_command}
+
+Rules:
+1. Generate only code.
+2. Do not explain outside the code.
+3. Code must be copy-paste ready.
+4. If Auto Detect is selected, infer language from instruction.
+5. Support Python, R, Perl, C, C++, Java, JavaScript, TypeScript, HTML, CSS, SQL, PHP, Bash, Go, and Rust.
+6. For Java, use public class Main.
+7. For Perl, include use strict and use warnings.
+8. For HTML/JavaScript/CSS, generate a full runnable HTML file when useful.
+9. For SQL, include clean SQL comments.
+10. Keep code complete but concise.
+11. Return only the final code.
+
+Final code:
+"""
+
+
+# ==========================================================
+# CLEAN MODEL OUTPUT
+# ==========================================================
 
 def clean_output(text):
     if "Final code:" in text:
         text = text.split("Final code:")[-1].strip()
 
-    blocks = re.findall(r"```(?:\\w+)?\\n(.*?)```", text, re.DOTALL)
+    blocks = re.findall(
+        r"```(?:\\w+)?\\n(.*?)```",
+        text,
+        re.DOTALL
+    )
 
     if blocks:
-        return "\\n\\n".join(blocks).strip()
+        return "\n\n".join(blocks).strip()
 
     return text.strip()
 
 
-def build_prompt(cmd, selected):
-    return f'''
-You are Qwen Coder.
+# ==========================================================
+# LOAD QWEN
+# ==========================================================
 
-Generate only complete runnable code.
+@st.cache_resource(show_spinner=False)
+def load_qwen_cached():
+    import torch
+    import transformers
 
-Language:
-{selected}
+    if not hasattr(transformers, "AutoTokenizer"):
+        raise ImportError("AutoTokenizer not found. Use transformers==4.52.4.")
 
-User instruction:
-{cmd}
+    if not hasattr(transformers, "AutoModelForCausalLM"):
+        raise ImportError("AutoModelForCausalLM not found. Use transformers==4.52.4.")
 
-Rules:
-- Return only code.
-- No explanation outside code.
-- Code must be copy-paste ready.
-- If Auto Detect, infer language.
-- Support Python, R, Perl, C, C++, Java, JavaScript, HTML, CSS, SQL, PHP, Bash.
-- For Java use public class Main.
-- For Perl use strict and warnings.
-- For HTML/JavaScript create full HTML if useful.
-
-Final code:
-'''
-
-
-def qwen_worker(cmd, selected, token_limit, queue):
-    try:
-        import torch
-        from transformers import AutoTokenizer, AutoModelForCausalLM
-
-        tokenizer = AutoTokenizer.from_pretrained(
-            MODEL_NAME,
-            trust_remote_code=True
-        )
-
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_NAME,
-            trust_remote_code=True,
-            low_cpu_mem_usage=True,
-            torch_dtype="auto"
-        )
-
-        model.eval()
-
-        prompt = build_prompt(cmd, selected)
-
-        messages = [
-            {"role": "system", "content": "You are Qwen Coder. Return only code."},
-            {"role": "user", "content": prompt}
-        ]
-
-        input_text = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True
-        )
-
-        inputs = tokenizer(
-            input_text,
-            return_tensors="pt",
-            truncation=True,
-            max_length=512
-        )
-
-        with torch.inference_mode():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=token_limit,
-                do_sample=False,
-                pad_token_id=tokenizer.eos_token_id
-            )
-
-        result = tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-        queue.put({
-            "ok": True,
-            "code": clean_output(result)
-        })
-
-    except Exception as e:
-        queue.put({
-            "ok": False,
-            "error": str(e)
-        })
-
-
-def run_qwen_with_timeout(cmd, selected, token_limit, timeout_seconds):
-    queue = mp.Queue()
-
-    process = mp.Process(
-        target=qwen_worker,
-        args=(cmd, selected, token_limit, queue)
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+        MODEL_NAME,
+        trust_remote_code=True
     )
 
-    process.start()
-    process.join(timeout_seconds)
+    model = transformers.AutoModelForCausalLM.from_pretrained(
+        MODEL_NAME,
+        trust_remote_code=True,
+        low_cpu_mem_usage=True,
+        torch_dtype="auto"
+    )
 
-    if process.is_alive():
-        process.terminate()
-        process.join()
-        return None, "Qwen timeout. Fallback output was used."
+    model.eval()
 
-    if not queue.empty():
-        result = queue.get()
-
-        if result.get("ok"):
-            return result.get("code"), None
-
-        return None, result.get("error")
-
-    return None, "Qwen returned no output."
+    return tokenizer, model
 
 
-def get_extension(cmd, selected):
-    lang = detect_language(cmd, selected)
+# ==========================================================
+# GENERATE WITH QWEN
+# ==========================================================
 
-    mapping = {
-        "Python": "py",
-        "R": "R",
-        "Perl": "pl",
-        "C": "c",
-        "C++": "cpp",
-        "Java": "java",
-        "JavaScript": "html",
-        "HTML": "html",
-        "CSS": "css",
-        "SQL": "sql",
-        "PHP": "php",
-        "Bash": "sh"
-    }
+def generate_with_qwen(user_command, selected_language, token_limit):
+    import torch
 
-    return mapping.get(lang, "txt")
+    tokenizer, model = load_qwen_cached()
 
+    prompt = build_prompt(user_command, selected_language)
+
+    messages = [
+        {
+            "role": "system",
+            "content": "You are Qwen Coder. Return only final runnable code."
+        },
+        {
+            "role": "user",
+            "content": prompt
+        }
+    ]
+
+    input_text = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+
+    inputs = tokenizer(
+        input_text,
+        return_tensors="pt",
+        truncation=True,
+        max_length=768
+    )
+
+    with torch.inference_mode():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=token_limit,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id
+        )
+
+    result = tokenizer.decode(
+        outputs[0],
+        skip_special_tokens=True
+    )
+
+    return clean_output(result)
+
+
+# ==========================================================
+# SESSION STATE
+# ==========================================================
 
 if "final_code" not in st.session_state:
     st.session_state.final_code = ""
 
+if "immediate_code" not in st.session_state:
+    st.session_state.immediate_code = ""
+
+
+# ==========================================================
+# CODE OUTPUT AREA ALWAYS VISIBLE
+# ==========================================================
+
+st.subheader("Code Output")
+
+code_output_box = st.empty()
+
+if st.session_state.final_code:
+    code_output_box.code(st.session_state.final_code)
+else:
+    code_output_box.code(
+        "# Code will appear here after you click Generate Code"
+    )
+
+
+# ==========================================================
+# GENERATE BUTTON
+# ==========================================================
+
 if st.button("🚀 Generate Code", use_container_width=True):
     if not command.strip():
-        st.warning("Please enter a coding instruction.")
+        st.warning("Please enter an instruction.")
         st.stop()
 
     immediate = fallback_code(command, language)
+
+    st.session_state.immediate_code = immediate
     st.session_state.final_code = immediate
 
-    st.subheader("Immediate Output")
-    st.code(immediate)
+    code_output_box.code(immediate)
 
     if use_qwen:
-        with st.spinner("Trying Qwen generation with timeout protection..."):
-            qwen_code, error = run_qwen_with_timeout(
-                command,
-                language,
-                max_tokens,
-                qwen_timeout
-            )
+        try:
+            with st.status("Qwen model is working...", expanded=True) as status:
+                st.write("Step 1: Immediate code is already visible.")
+                st.write("Step 2: Loading Qwen model.")
+                st.write("Step 3: Preparing prompt.")
+                st.write("Step 4: Generating code.")
 
-        if qwen_code and len(qwen_code.strip()) > 20:
-            st.session_state.final_code = qwen_code
-            st.success("Qwen generated code successfully.")
-        else:
-            st.warning(error or "Qwen did not generate output. Fallback output used.")
+                qwen_code = generate_with_qwen(
+                    user_command=command,
+                    selected_language=language,
+                    token_limit=max_tokens
+                )
+
+                if qwen_code and len(qwen_code.strip()) > 20:
+                    st.session_state.final_code = qwen_code
+                    code_output_box.code(qwen_code)
+
+                    status.update(
+                        label="Qwen generated the final code.",
+                        state="complete"
+                    )
+                else:
+                    status.update(
+                        label="Qwen returned empty output. Immediate output is used.",
+                        state="complete"
+                    )
+
+        except Exception as error:
+            st.warning("Qwen failed or server memory is low. Immediate output remains visible.")
+
+            if show_debug:
+                with st.expander("Debug details"):
+                    st.exception(error)
+
+
+# ==========================================================
+# DOWNLOAD BUTTON
+# ==========================================================
 
 if st.session_state.final_code:
-    st.subheader("Final Downloadable Code")
-    st.code(st.session_state.final_code)
-
-    filename = (
+    file_name = (
         "generated_code_"
         + datetime.now().strftime("%Y%m%d_%H%M%S")
         + "."
@@ -374,7 +692,7 @@ if st.session_state.final_code:
     st.download_button(
         label="⬇️ Download Code",
         data=st.session_state.final_code,
-        file_name=filename,
+        file_name=file_name,
         mime="text/plain",
         use_container_width=True
     )
