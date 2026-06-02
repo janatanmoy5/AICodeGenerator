@@ -435,6 +435,5 @@ Rules:
 
 
 def clean_output(text):
-    # Extract code between ``` blocks if they exist
-    blocks = re.findall(
-        r"
+    # Single-line regex evaluation prevents cross-platform parsing issues
+    blocks = re.findall(r"
