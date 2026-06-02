@@ -8,59 +8,55 @@ import streamlit as st
 try:
     import torch
     from transformers import AutoTokenizer, AutoModelForCausalLM
-    QWEN_AVAILABLE = True
-except Exception:
-    QWEN_AVAILABLE = False
+    QWEN_READY = True
+except Exception as import_error:
+    QWEN_READY = False
+    IMPORT_ERROR = import_error
 
 
 st.set_page_config(
-    page_title="Free Qwen Multi-Language Code Generator",
+    page_title="Qwen AI Code Generator",
     page_icon="🤖",
     layout="wide"
 )
 
-st.title("🤖 Free Qwen Multi-Language Code Generator")
-st.write("Enter any coding command. Qwen will generate copy-paste-ready code.")
+st.title("🤖 Qwen AI Code Generator")
+st.write("Write any coding command. Qwen will generate ready-to-copy code.")
 
-MODEL_NAME = os.getenv(
-    "QWEN_MODEL",
-    "Qwen/Qwen2.5-Coder-0.5B-Instruct"
-)
-
-SUPPORTED_LANGUAGES = [
-    "Auto Detect",
-    "Python",
-    "R",
-    "Perl",
-    "C",
-    "C++",
-    "Java",
-    "JavaScript",
-    "TypeScript",
-    "HTML",
-    "CSS",
-    "HTML + CSS + JavaScript",
-    "SQL",
-    "PHP",
-    "Bash",
-    "Go",
-    "Rust"
-]
+MODEL_NAME = os.getenv("QWEN_MODEL", "Qwen/Qwen2.5-Coder-0.5B-Instruct")
 
 with st.sidebar:
     st.header("Settings")
 
     language = st.selectbox(
-        "Programming language",
-        SUPPORTED_LANGUAGES
+        "Programming Language",
+        [
+            "Auto Detect",
+            "Python",
+            "R",
+            "Perl",
+            "C",
+            "C++",
+            "Java",
+            "JavaScript",
+            "TypeScript",
+            "HTML",
+            "CSS",
+            "HTML + CSS + JavaScript",
+            "SQL",
+            "PHP",
+            "Bash",
+            "Go",
+            "Rust"
+        ]
     )
 
     max_tokens = st.slider(
-        "Output length",
-        min_value=256,
-        max_value=2048,
-        value=1024,
-        step=256
+        "Output Length",
+        min_value=128,
+        max_value=1536,
+        value=768,
+        step=128
     )
 
     temperature = st.slider(
@@ -71,33 +67,22 @@ with st.sidebar:
         step=0.1
     )
 
-    st.caption("Model: " + MODEL_NAME)
+    show_debug = st.checkbox("Show Debug Info", value=True)
 
-    clear_cache = st.button("Clear model memory")
-
-    if clear_cache:
+    if st.button("Clear Model Cache"):
         st.cache_resource.clear()
         gc.collect()
-        st.success("Memory cleared. Reload the app if needed.")
+        st.success("Cache cleared.")
 
 
 command = st.text_area(
     "Enter your coding command",
-    height=230,
-    placeholder="""
-Examples:
-Write Python code to add two numbers
-Write R code for PCA analysis
-Write SQL query to retrieve patient data
-Create HTML CSS JavaScript calculator
-Write Java program for student grade calculation
-Write Perl script to search a name in a text file
-Write C++ code for binary search
-"""
+    height=220,
+    placeholder="Example: Write R code to add two numbers"
 )
 
 
-@st.cache_resource(show_spinner="Loading Qwen model...")
+@st.cache_resource(show_spinner=False)
 def load_qwen_model():
     tokenizer = AutoTokenizer.from_pretrained(
         MODEL_NAME,
@@ -119,8 +104,8 @@ def load_qwen_model():
 def build_prompt(user_command, selected_language):
     parts = []
 
-    parts.append("You are Qwen Coder, an expert multi-language software engineer.")
-    parts.append("Your task is to generate complete, correct, copy-paste-ready code.")
+    parts.append("You are Qwen Coder, an expert programming assistant.")
+    parts.append("Generate complete, correct, copy-paste-ready code.")
     parts.append("")
     parts.append("Selected language:")
     parts.append(selected_language)
@@ -129,21 +114,19 @@ def build_prompt(user_command, selected_language):
     parts.append(user_command)
     parts.append("")
     parts.append("Rules:")
-    parts.append("1. Generate code in the selected language only.")
-    parts.append("2. If Auto Detect is selected, infer the language from the user command.")
-    parts.append("3. Support Python, R, Perl, C, C++, Java, JavaScript, TypeScript, HTML, CSS, SQL, PHP, Bash, Go, and Rust.")
-    parts.append("4. Write complete runnable code.")
-    parts.append("5. Include all imports, libraries, class definitions, or package calls when needed.")
-    parts.append("6. Include comments inside the code.")
-    parts.append("7. Include input/output handling where useful.")
-    parts.append("8. For Java, use public class Main with main method.")
-    parts.append("9. For R, use valid R syntax only.")
-    parts.append("10. For Perl, include use strict and use warnings.")
-    parts.append("11. For HTML/CSS/JavaScript, generate a complete HTML file when possible.")
-    parts.append("12. For SQL, write clean SQL with comments.")
-    parts.append("13. Do not use paid APIs or API keys.")
-    parts.append("14. Do not explain outside the code.")
-    parts.append("15. Return only final code.")
+    parts.append("1. Generate code in the requested language.")
+    parts.append("2. If Auto Detect is selected, infer language from the command.")
+    parts.append("3. Support Python, R, Perl, C, C++, Java, JavaScript, HTML, CSS, SQL, PHP, Bash, Go, Rust.")
+    parts.append("4. Code must be runnable after copy-paste.")
+    parts.append("5. Include imports or package calls if required.")
+    parts.append("6. Include comments inside code.")
+    parts.append("7. Do not explain outside code.")
+    parts.append("8. Do not use API keys.")
+    parts.append("9. For Java, use public class Main.")
+    parts.append("10. For R, use valid R syntax only.")
+    parts.append("11. For Perl, include use strict and use warnings.")
+    parts.append("12. For HTML/CSS/JavaScript, create a full HTML document if useful.")
+    parts.append("13. Return only final code.")
     parts.append("")
     parts.append("Final code:")
 
@@ -155,7 +138,7 @@ def clean_output(text):
         text = text.split("Final code:")[-1].strip()
 
     blocks = re.findall(
-        r"```(?:\\w+)?\\n(.*?)```",
+        r"```(?:\w+)?\n(.*?)```",
         text,
         re.DOTALL
     )
@@ -169,15 +152,12 @@ def clean_output(text):
 def generate_with_qwen(user_command, selected_language, token_limit, temp):
     tokenizer, model = load_qwen_model()
 
-    prompt = build_prompt(
-        user_command=user_command,
-        selected_language=selected_language
-    )
+    prompt = build_prompt(user_command, selected_language)
 
     messages = [
         {
             "role": "system",
-            "content": "You are Qwen Coder. Return only final runnable code."
+            "content": "You are Qwen Coder. Return only complete runnable code."
         },
         {
             "role": "user",
@@ -206,12 +186,12 @@ def generate_with_qwen(user_command, selected_language, token_limit, temp):
             pad_token_id=tokenizer.eos_token_id
         )
 
-    generated = tokenizer.decode(
+    result = tokenizer.decode(
         outputs[0],
         skip_special_tokens=True
     )
 
-    return clean_output(generated)
+    return clean_output(result)
 
 
 def fallback_code(user_command, selected_language):
@@ -219,7 +199,7 @@ def fallback_code(user_command, selected_language):
     lang = selected_language.lower()
 
     if selected_language == "Auto Detect":
-        if "r code" in text:
+        if "r code" in text or text.startswith("r "):
             lang = "r"
         elif "perl" in text:
             lang = "perl"
@@ -315,6 +295,34 @@ public class Main {
 }
 """
 
+        if lang == "html" or lang == "javascript":
+            return """<!DOCTYPE html>
+<html>
+<head>
+    <title>Add Two Numbers</title>
+</head>
+<body>
+    <h2>Add Two Numbers</h2>
+
+    <input id="num1" type="number" placeholder="First number">
+    <input id="num2" type="number" placeholder="Second number">
+    <button onclick="addNumbers()">Add</button>
+
+    <p id="result"></p>
+
+    <script>
+        function addNumbers() {
+            const num1 = parseFloat(document.getElementById("num1").value);
+            const num2 = parseFloat(document.getElementById("num2").value);
+            const sum = num1 + num2;
+
+            document.getElementById("result").innerText = "The sum is: " + sum;
+        }
+    </script>
+</body>
+</html>
+"""
+
         return """# Python program to add two numbers
 
 try:
@@ -329,10 +337,10 @@ except ValueError:
     print("Error: Please enter valid numbers.")
 """
 
-    return """# Starter code
+    return """# Fallback starter code
 
-print("Qwen could not generate code on this server.")
-print("Try a shorter command or increase Render memory.")
+print("Qwen model could not generate code on this server.")
+print("Try a shorter prompt, reduce output length, or use a Render instance with more RAM.")
 """
 
 
@@ -374,56 +382,65 @@ if st.button("🚀 Generate Code", use_container_width=True):
         st.warning("Please enter a coding command.")
         st.stop()
 
+    progress = st.progress(0)
+    status = st.empty()
+
+    code = ""
+
     try:
-        if QWEN_AVAILABLE:
-            with st.spinner("Qwen is generating your code..."):
-                code = generate_with_qwen(
-                    user_command=command,
-                    selected_language=language,
-                    token_limit=max_tokens,
-                    temp=temperature
-                )
-        else:
+        if not QWEN_READY:
+            status.warning("Qwen dependencies are not available. Using fallback generator.")
             code = fallback_code(command, language)
 
-        st.success("Code generated successfully.")
+            if show_debug:
+                st.exception(IMPORT_ERROR)
 
-        st.subheader("Generated Code")
-        st.code(code)
+        else:
+            status.info("Step 1/3: Loading Qwen model...")
+            progress.progress(25)
 
-        ext = get_extension(language, command)
+            tokenizer, model = load_qwen_model()
 
-        file_name = (
-            "generated_code_"
-            + datetime.now().strftime("%Y%m%d_%H%M%S")
-            + "."
-            + ext
-        )
+            status.info("Step 2/3: Preparing prompt...")
+            progress.progress(50)
 
-        st.download_button(
-            label="⬇️ Download Code",
-            data=code,
-            file_name=file_name,
-            mime="text/plain",
-            use_container_width=True
-        )
+            status.info("Step 3/3: Generating code...")
+            progress.progress(75)
+
+            code = generate_with_qwen(
+                user_command=command,
+                selected_language=language,
+                token_limit=max_tokens,
+                temp=temperature
+            )
+
+            progress.progress(100)
+            status.success("Code generated successfully.")
 
     except Exception as error:
-        st.error("Qwen could not run on this Render server.")
-        st.info("Try a smaller prompt, reduce output length, or use a Render instance with more RAM.")
+        status.error("Qwen failed on this server. Showing fallback code.")
+        code = fallback_code(command, language)
 
-        fallback = fallback_code(command, language)
+        if show_debug:
+            with st.expander("Debug Error"):
+                st.exception(error)
 
-        st.subheader("Fallback Code")
-        st.code(fallback)
+    st.subheader("Generated Code")
+    st.code(code)
 
-        st.download_button(
-            label="⬇️ Download Fallback Code",
-            data=fallback,
-            file_name="fallback_code.txt",
-            mime="text/plain",
-            use_container_width=True
-        )
+    ext = get_extension(language, command)
 
-        with st.expander("Error details"):
-            st.exception(error)
+    file_name = (
+        "generated_code_"
+        + datetime.now().strftime("%Y%m%d_%H%M%S")
+        + "."
+        + ext
+    )
+
+    st.download_button(
+        label="⬇️ Download Code",
+        data=code,
+        file_name=file_name,
+        mime="text/plain",
+        use_container_width=True
+    )
