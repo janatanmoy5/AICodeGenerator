@@ -7,6 +7,7 @@ os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
 
 import streamlit as st
 
+
 st.set_page_config(
     page_title="Qwen AI Code Generator",
     page_icon="🤖",
@@ -14,10 +15,11 @@ st.set_page_config(
 )
 
 st.title("🤖 Qwen AI Code Generator")
-st.write("Enter any coding instruction. The app gives immediate code and can improve it using Qwen/Hugging Face.")
+st.write("Enter any coding instruction. The app gives immediate code and optionally improves it with Qwen.")
 
 MODEL_NAME = os.getenv("QWEN_MODEL", "Qwen/Qwen2.5-Coder-32B-Instruct")
 API_URL = f"https://api-inference.huggingface.co/models/{MODEL_NAME}"
+
 
 with st.sidebar:
     st.header("Settings")
@@ -53,20 +55,28 @@ with st.sidebar:
         step=64
     )
 
-    use_qwen = st.checkbox("Use Qwen/Hugging Face generation", value=True)
+    use_qwen = st.checkbox(
+        "Use Qwen/Hugging Face generation",
+        value=False
+    )
 
     hf_token_input = st.text_input(
         "Hugging Face Token Optional",
         type="password"
     )
 
-    show_debug = st.checkbox("Show debug info", value=True)
+    show_debug = st.checkbox(
+        "Show debug info",
+        value=False
+    )
+
 
 command = st.text_area(
     "Enter your coding instruction",
     height=220,
     placeholder="Example: write R code to add two numbers"
 )
+
 
 def detect_language(user_command, selected_language):
     text = user_command.lower()
@@ -105,6 +115,7 @@ def detect_language(user_command, selected_language):
 
     return "Python"
 
+
 def get_extension(user_command, selected_language):
     lang = detect_language(user_command, selected_language)
 
@@ -128,6 +139,7 @@ def get_extension(user_command, selected_language):
     }
 
     return mapping.get(lang, "txt")
+
 
 def fallback_code(user_command, selected_language):
     text = user_command.lower()
@@ -372,14 +384,21 @@ echo $message;
 ?>
 '''
 
+    if lang == "Bash":
+        return '''#!/bin/bash
+
+echo "Hello from Bash"
+'''
+
     return f'''# Starter code
 
 # Language: {lang}
 # User request:
 # {user_command}
 
-print("Qwen can generate the full custom code for this request.")
+print("Qwen can generate the full custom code for this request when enabled.")
 '''
+
 
 def build_prompt(user_command, selected_language):
     lang = detect_language(user_command, selected_language)
@@ -406,6 +425,7 @@ Rules:
 9. For HTML/CSS/JavaScript, return complete HTML if useful.
 '''
 
+
 def clean_output(text):
     blocks = re.findall(
         r"```(?:\w+)?\n(.*?)```",
@@ -421,10 +441,17 @@ def clean_output(text):
 
     return text.strip()
 
+
+def internet_available():
+    try:
+        requests.get("https://huggingface.co", timeout=8)
+        return True
+    except Exception:
+        return False
+
+
 def call_qwen_hf(user_command, selected_language, token_limit, token):
-    headers = {
-        "Content-Type": "application/json"
-    }
+    headers = {"Content-Type": "application/json"}
 
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -452,48 +479,51 @@ def call_qwen_hf(user_command, selected_language, token_limit, token):
 
     data = response.json()
 
-    if isinstance(data, list) and len(data) > 0:
-        if "generated_text" in data[0]:
-            return clean_output(data[0]["generated_text"])
+    if isinstance(data, list) and len(data) > 0 and "generated_text" in data[0]:
+        return clean_output(data[0]["generated_text"])
 
     if isinstance(data, dict) and "generated_text" in data:
         return clean_output(data["generated_text"])
 
     return clean_output(str(data))
 
+
 if st.button("🚀 Generate Code", use_container_width=True):
+
     if not command.strip():
         st.warning("Please enter your coding instruction.")
         st.stop()
 
     instant_code = fallback_code(command, language)
+    final_code = instant_code
 
     st.subheader("Immediate Code Output")
     st.code(instant_code)
 
-    final_code = instant_code
-
     if use_qwen:
-        try:
-            with st.spinner("Generating improved Qwen code..."):
-                final_code = call_qwen_hf(
-                    user_command=command,
-                    selected_language=language,
-                    token_limit=max_tokens,
-                    token=hf_token_input
-                )
+        if not internet_available():
+            st.warning("Qwen API is not reachable from this server. Immediate code is shown instead.")
+        else:
+            try:
+                with st.spinner("Generating improved Qwen code..."):
+                    final_code = call_qwen_hf(
+                        user_command=command,
+                        selected_language=language,
+                        token_limit=max_tokens,
+                        token=hf_token_input
+                    )
 
-            st.success("Qwen code generated successfully.")
+                st.success("Qwen code generated successfully.")
 
-            st.subheader("Qwen Generated Code")
-            st.code(final_code)
+                st.subheader("Qwen Generated Code")
+                st.code(final_code)
 
-        except Exception as error:
-            st.warning("Qwen could not generate code. Immediate code is still available.")
+            except Exception as error:
+                st.warning("Qwen could not generate code. Immediate code is still available.")
 
-            if show_debug:
-                with st.expander("Debug information"):
-                    st.exception(error)
+                if show_debug:
+                    with st.expander("Debug information"):
+                        st.exception(error)
 
     ext = get_extension(command, language)
 
