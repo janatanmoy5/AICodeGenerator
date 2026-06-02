@@ -10,10 +10,6 @@ os.environ["HF_HOME"] = os.getenv("HF_HOME", "/tmp/huggingface")
 import streamlit as st
 
 
-# ==========================================================
-# PAGE CONFIG
-# ==========================================================
-
 st.set_page_config(
     page_title="Qwen AI Code Generator",
     page_icon="🤖",
@@ -22,16 +18,11 @@ st.set_page_config(
 
 st.title("🤖 Qwen AI Code Generator")
 st.write(
-    "Write any command. The app loads Qwen, prepares the logic, "
-    "generates code, shows it clearly, and provides a download button."
+    "Write any command. The app shows immediate code first, then Qwen-generated code if the model finishes successfully."
 )
 
 MODEL_NAME = os.getenv("QWEN_MODEL", "Qwen/Qwen2.5-Coder-0.5B-Instruct")
 
-
-# ==========================================================
-# SIDEBAR
-# ==========================================================
 
 with st.sidebar:
     st.header("Settings")
@@ -68,35 +59,27 @@ with st.sidebar:
     )
 
     use_qwen = st.checkbox(
-        "Use Qwen Model",
+        "Use Qwen model",
         value=True
     )
 
     show_debug = st.checkbox(
-        "Show Debug Info",
-        value=False
+        "Show debug info",
+        value=True
     )
 
-    if st.button("Clear Memory"):
+    if st.button("Clear memory"):
         st.cache_resource.clear()
         gc.collect()
         st.success("Memory cleared.")
 
 
-# ==========================================================
-# USER INPUT
-# ==========================================================
-
 command = st.text_area(
     "Enter your coding instruction",
     height=220,
-    placeholder="Example: Write HTML code to print my name is Tanmoy"
+    placeholder="Example: write html code to print my name is Tanmoy"
 )
 
-
-# ==========================================================
-# LANGUAGE DETECTION
-# ==========================================================
 
 def detect_language(user_command, selected_language):
     text = user_command.lower()
@@ -136,10 +119,6 @@ def detect_language(user_command, selected_language):
     return "Python"
 
 
-# ==========================================================
-# FILE EXTENSION
-# ==========================================================
-
 def get_extension(user_command, selected_language):
     lang = detect_language(user_command, selected_language)
 
@@ -165,18 +144,10 @@ def get_extension(user_command, selected_language):
     return mapping.get(lang, "txt")
 
 
-# ==========================================================
-# FALLBACK GENERATOR
-# Shows immediate useful output if Qwen is slow/fails
-# ==========================================================
-
 def fallback_code(user_command, selected_language):
     text = user_command.lower()
     lang = detect_language(user_command, selected_language)
 
-    # --------------------------
-    # NAME PRINTING EXAMPLES
-    # --------------------------
     if "name" in text and "tanmoy" in text:
         if lang == "HTML":
             return """<!DOCTYPE html>
@@ -272,9 +243,6 @@ int main() {
         return """print("My name is Tanmoy")
 """
 
-    # --------------------------
-    # ADD TWO NUMBERS
-    # --------------------------
     if "add" in text and "number" in text:
         if lang == "R":
             return """# R program to add two numbers
@@ -408,9 +376,6 @@ except ValueError:
     print("Error: Please enter valid numbers.")
 """
 
-    # --------------------------
-    # BASIC HTML
-    # --------------------------
     if lang == "HTML":
         return """<!DOCTYPE html>
 <html>
@@ -424,21 +389,13 @@ except ValueError:
 </html>
 """
 
-    # --------------------------
-    # BASIC PHP
-    # --------------------------
     if lang == "PHP":
         return """<?php
-// Simple PHP starter code
-
 $message = "Hello from PHP";
 echo $message;
 ?>
 """
 
-    # --------------------------
-    # BASIC SQL
-    # --------------------------
     if lang == "SQL":
         return """-- SQL query template
 
@@ -450,9 +407,6 @@ WHERE
     condition_column = 'value';
 """
 
-    # --------------------------
-    # DEFAULT
-    # --------------------------
     return f"""# Starter code
 
 # Language: {lang}
@@ -463,10 +417,6 @@ print("Qwen is required for this custom request.")
 print("If Qwen is slow, reduce output length or use a stronger Render instance.")
 """
 
-
-# ==========================================================
-# PROMPT FOR QWEN
-# ==========================================================
 
 def build_prompt(user_command, selected_language):
     return f"""
@@ -495,10 +445,6 @@ Final code:
 """
 
 
-# ==========================================================
-# CLEAN MODEL OUTPUT
-# ==========================================================
-
 def clean_output(text):
     if "Final code:" in text:
         text = text.split("Final code:")[-1].strip()
@@ -515,27 +461,18 @@ def clean_output(text):
     return text.strip()
 
 
-# ==========================================================
-# LOAD QWEN
-# ==========================================================
-
 @st.cache_resource(show_spinner=False)
 def load_qwen_cached():
     import torch
-    import transformers
+    from transformers.models.auto.tokenization_auto import AutoTokenizer
+    from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 
-    if not hasattr(transformers, "AutoTokenizer"):
-        raise ImportError("AutoTokenizer not found. Use transformers==4.52.4.")
-
-    if not hasattr(transformers, "AutoModelForCausalLM"):
-        raise ImportError("AutoModelForCausalLM not found. Use transformers==4.52.4.")
-
-    tokenizer = transformers.AutoTokenizer.from_pretrained(
+    tokenizer = AutoTokenizer.from_pretrained(
         MODEL_NAME,
         trust_remote_code=True
     )
 
-    model = transformers.AutoModelForCausalLM.from_pretrained(
+    model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
         trust_remote_code=True,
         low_cpu_mem_usage=True,
@@ -546,10 +483,6 @@ def load_qwen_cached():
 
     return tokenizer, model
 
-
-# ==========================================================
-# GENERATE WITH QWEN
-# ==========================================================
 
 def generate_with_qwen(user_command, selected_language, token_limit):
     import torch
@@ -598,20 +531,12 @@ def generate_with_qwen(user_command, selected_language, token_limit):
     return clean_output(result)
 
 
-# ==========================================================
-# SESSION STATE
-# ==========================================================
-
 if "final_code" not in st.session_state:
     st.session_state.final_code = ""
 
 if "immediate_code" not in st.session_state:
     st.session_state.immediate_code = ""
 
-
-# ==========================================================
-# CODE OUTPUT AREA ALWAYS VISIBLE
-# ==========================================================
 
 st.subheader("Code Output")
 
@@ -624,10 +549,6 @@ else:
         "# Code will appear here after you click Generate Code"
     )
 
-
-# ==========================================================
-# GENERATE BUTTON
-# ==========================================================
 
 if st.button("🚀 Generate Code", use_container_width=True):
     if not command.strip():
@@ -676,10 +597,6 @@ if st.button("🚀 Generate Code", use_container_width=True):
                 with st.expander("Debug details"):
                     st.exception(error)
 
-
-# ==========================================================
-# DOWNLOAD BUTTON
-# ==========================================================
 
 if st.session_state.final_code:
     file_name = (
