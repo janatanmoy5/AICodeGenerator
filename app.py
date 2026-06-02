@@ -9,7 +9,6 @@ os.environ["HF_HOME"] = os.getenv("HF_HOME", "/tmp/huggingface")
 
 import streamlit as st
 
-
 st.set_page_config(
     page_title="Qwen AI Code Generator",
     page_icon="🤖",
@@ -129,7 +128,7 @@ def get_extension(user_command, selected_language):
         "C": "c",
         "C++": "cpp",
         "Java": "java",
-        "JavaScript": "html",
+        "JavaScript": "js",
         "TypeScript": "ts",
         "HTML": "html",
         "CSS": "css",
@@ -198,7 +197,7 @@ echo "My name is " . $name;
 """
 
         if lang == "R":
-            return """cat("My name is Tanmoy\\n")
+            return """cat("My name is Tanmoy\n")
 """
 
         if lang == "Perl":
@@ -206,14 +205,14 @@ echo "My name is " . $name;
 use strict;
 use warnings;
 
-print "My name is Tanmoy\\n";
+print "My name is Tanmoy\n";
 """
 
         if lang == "C":
             return """#include <stdio.h>
 
 int main() {
-    printf("My name is Tanmoy\\n");
+    printf("My name is Tanmoy\n");
     return 0;
 }
 """
@@ -256,7 +255,7 @@ num2 <- as.numeric(readline(prompt = "Enter second number: "))
 
 result <- add_two_numbers(num1, num2)
 
-cat("The sum is:", result, "\\n")
+cat("The sum is:", result, "\n")
 """
 
         if lang == "Perl":
@@ -274,7 +273,7 @@ chomp($num2);
 
 my $sum = $num1 + $num2;
 
-print "The sum is: $sum\\n";
+print "The sum is: $sum\n";
 """
 
         if lang == "C":
@@ -289,7 +288,7 @@ int main() {
     printf("Enter second number: ");
     scanf("%lf", &num2);
 
-    printf("The sum is: %.2f\\n", num1 + num2);
+    printf("The sum is: %.2f\n", num1 + num2);
 
     return 0;
 }
@@ -450,166 +449,13 @@ def clean_output(text):
         text = text.split("Final code:")[-1].strip()
 
     blocks = re.findall(
-        r"```(?:\\w+)?\\n(.*?)```",
-        text,
-        re.DOTALL
-    )
+        r"
+http://googleusercontent.com/immersive_entry_chip/0
 
-    if blocks:
-        return "\n\n".join(blocks).strip()
-
-    return text.strip()
-
-
-@st.cache_resource(show_spinner=False)
-def load_qwen_cached():
-    import torch
-    from transformers.models.auto.tokenization_auto import AutoTokenizer
-    from transformers.models.auto.modeling_auto import AutoModelForCausalLM
-
-    tokenizer = AutoTokenizer.from_pretrained(
-        MODEL_NAME,
-        trust_remote_code=True
-    )
-
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_NAME,
-        trust_remote_code=True,
-        low_cpu_mem_usage=True,
-        torch_dtype="auto"
-    )
-
-    model.eval()
-
-    return tokenizer, model
-
-
-def generate_with_qwen(user_command, selected_language, token_limit):
-    import torch
-
-    tokenizer, model = load_qwen_cached()
-
-    prompt = build_prompt(user_command, selected_language)
-
-    messages = [
-        {
-            "role": "system",
-            "content": "You are Qwen Coder. Return only final runnable code."
-        },
-        {
-            "role": "user",
-            "content": prompt
-        }
-    ]
-
-    input_text = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True
-    )
-
-    inputs = tokenizer(
-        input_text,
-        return_tensors="pt",
-        truncation=True,
-        max_length=768
-    )
-
-    with torch.inference_mode():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=token_limit,
-            do_sample=False,
-            pad_token_id=tokenizer.eos_token_id
-        )
-
-    result = tokenizer.decode(
-        outputs[0],
-        skip_special_tokens=True
-    )
-
-    return clean_output(result)
-
-
-if "final_code" not in st.session_state:
-    st.session_state.final_code = ""
-
-if "immediate_code" not in st.session_state:
-    st.session_state.immediate_code = ""
-
-
-st.subheader("Code Output")
-
-code_output_box = st.empty()
-
-if st.session_state.final_code:
-    code_output_box.code(st.session_state.final_code)
-else:
-    code_output_box.code(
-        "# Code will appear here after you click Generate Code"
-    )
-
-
-if st.button("🚀 Generate Code", use_container_width=True):
-    if not command.strip():
-        st.warning("Please enter an instruction.")
-        st.stop()
-
-    immediate = fallback_code(command, language)
-
-    st.session_state.immediate_code = immediate
-    st.session_state.final_code = immediate
-
-    code_output_box.code(immediate)
-
-    if use_qwen:
-        try:
-            with st.status("Qwen model is working...", expanded=True) as status:
-                st.write("Step 1: Immediate code is already visible.")
-                st.write("Step 2: Loading Qwen model.")
-                st.write("Step 3: Preparing prompt.")
-                st.write("Step 4: Generating code.")
-
-                qwen_code = generate_with_qwen(
-                    user_command=command,
-                    selected_language=language,
-                    token_limit=max_tokens
-                )
-
-                if qwen_code and len(qwen_code.strip()) > 20:
-                    st.session_state.final_code = qwen_code
-                    code_output_box.code(qwen_code)
-
-                    status.update(
-                        label="Qwen generated the final code.",
-                        state="complete"
-                    )
-                else:
-                    status.update(
-                        label="Qwen returned empty output. Immediate output is used.",
-                        state="complete"
-                    )
-
-        except Exception as error:
-            st.warning("Qwen failed or server memory is low. Immediate output remains visible.")
-
-            if show_debug:
-                with st.expander("Debug details"):
-                    st.exception(error)
-
-
-if st.session_state.final_code:
-    file_name = (
-        "generated_code_"
-        + datetime.now().strftime("%Y%m%d_%H%M%S")
-        + "."
-        + get_extension(command, language)
-    )
-
-    st.download_button(
-        label="⬇️ Download Code",
-        data=st.session_state.final_code,
-        file_name=file_name,
-        mime="text/plain",
-        use_container_width=True
-    )
+### 📋 Important Deployment Requirement
+Make sure your `requirements.txt` file explicitly includes `accelerate` so that the `device_map="auto"` argument works properly in low-memory environments:
+```text
+streamlit
+torch
+transformers
+accelerate
