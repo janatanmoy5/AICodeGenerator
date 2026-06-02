@@ -19,7 +19,7 @@ st.write(
     "Write any command. The app shows immediate code first, then Qwen-generated code using Hugging Face's high-speed API."
 )
 
-# Upgraded default model to the vastly superior 32B Coder model!
+# Render friendly: utilize serverless HF inference instead of loading models locally in RAM
 MODEL_NAME = os.getenv("QWEN_MODEL", "Qwen/Qwen2.5-Coder-32B-Instruct")
 
 
@@ -52,7 +52,7 @@ with st.sidebar:
     max_tokens = st.slider(
         "Output Length",
         min_value=64,
-        max_value=1024, # Increased because API is super fast!
+        max_value=1024,
         value=512,
         step=64
     )
@@ -64,7 +64,6 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("API Authorization")
-    # Users can insert their free HF Token here if they run into rate limits
     hf_token_input = st.text_input(
         "Hugging Face Token (Optional)",
         type="password",
